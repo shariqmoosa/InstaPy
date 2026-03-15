@@ -242,6 +242,11 @@ class Browser:
                 f"[Browser] Proxy: {self._proxy['scheme']}://"
                 f"{self._proxy['host']}:{self._proxy['port']}"
             )
+        # On Railway/Nixpacks, Chromium lives in the nix store; detect it automatically.
+        import shutil
+        nix_chromium = shutil.which("chromium") or shutil.which("chromium-browser")
+        if nix_chromium:
+            options.binary_location = nix_chromium
         driver = uc.Chrome(options=options, headless=self._headless, version_main=None)
         return driver
 

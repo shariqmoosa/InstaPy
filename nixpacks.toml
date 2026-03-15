@@ -1,0 +1,16 @@
+# Railway/Nixpacks build config
+# Installs Chromium + Xvfb so the shopping agent can run headless Chrome
+
+[phases.setup]
+nixPkgs = [
+    "chromium",
+    "chromedriver",
+    "xorg.xorgserver",   # Xvfb
+    "xvfb-run",
+]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
+
+[start]
+cmd = "Xvfb :99 -screen 0 1366x768x24 -ac +extension GLX +render -noreset & export DISPLAY=:99 && uvicorn shopping_agent.api:app --host 0.0.0.0 --port ${PORT:-8000}"
