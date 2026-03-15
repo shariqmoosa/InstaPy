@@ -226,7 +226,28 @@ class Browser:
     # Driver factories
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _find_chrome_binary():
+        """Return the path to Chrome/Chromium, preferring the full Chrome on x86."""
+        import shutil
+        for name in ("google-chrome-stable", "google-chrome", "chromium", "chromium-browser"):
+            path = shutil.which(name)
+            if path:
+                return path
+        return None
+
+    @staticmethod
+    def _find_chromedriver():
+        """Return the path to a system-installed chromedriver, or None."""
+        import shutil
+        for name in ("chromedriver", "chromium-chromedriver"):
+            path = shutil.which(name)
+            if path:
+                return path
+        return None
+
     def _start_undetected_chrome(self):
+        import platform
         options = uc.ChromeOptions()
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
@@ -242,18 +263,33 @@ class Browser:
                 f"[Browser] Proxy: {self._proxy['scheme']}://"
                 f"{self._proxy['host']}:{self._proxy['port']}"
             )
-        # On Railway/Nixpacks, Chromium lives in the nix store; detect it automatically.
-        import shutil
-        nix_chromium = shutil.which("chromium") or shutil.which("chromium-browser")
-        if nix_chromium:
-            options.binary_location = nix_chromium
-        driver = uc.Chrome(options=options, headless=self._headless, version_main=None)
+
+        chrome_bin = self._find_chrome_binary()
+        if chrome_bin:
+            options.binary_location = chrome_bin
+            print(f"[Browser] Using browser binary: {chrome_bin}")
+
+        # On ARM (Raspberry Pi) undetected-chromedriver cannot download the
+        # correct chromedriver binary — use the system-installed one instead.
+        driver_executable_path = None
+        is_arm = platform.machine() in ("armv7l", "aarch64", "armv6l")
+        if is_arm:
+            driver_executable_path = self._find_chromedriver()
+            print(f"[Browser] ARM detected, using system chromedriver: {driver_executable_path}")
+
+        driver = uc.Chrome(
+            options=options,
+            headless=self._headless,
+            version_main=None,
+            driver_executable_path=driver_executable_path,
+        )
         return driver
 
     def _start_plain_chrome(self):
         """Fallback when undetected-chromedriver is not installed."""
         from selenium import webdriver
         from selenium.webdriver.chrome.options import Options
+        from selenium.webdriver.chrome.service import Service
 
         options = Options()
         options.add_argument("--no-sandbox")
@@ -274,7 +310,16 @@ class Browser:
                 f"[Browser] Proxy: {self._proxy['scheme']}://"
                 f"{self._proxy['host']}:{self._proxy['port']}"
             )
-        driver = webdriver.Chrome(options=options)
+
+        chrome_bin = self._find_chrome_binary()
+        if chrome_bin:
+            options.binary_location = chrome_bin
+
+        chromedriver = self._find_chromedriver()
+        if chromedriver:
+            driver = webdriver.Chrome(service=Service(chromedriver), options=options)
+        else:
+            driver = webdriver.Chrome(options=options)
         return driver
 
     # ------------------------------------------------------------------
