@@ -6,3 +6,5 @@ GitPython
 anthropic
 undetected-chromedriver
 selenium-stealth
+openai
+google-generativeai
