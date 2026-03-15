@@ -10,29 +10,26 @@
 FROM python:3.11-slim
 
 # ---------- system deps + Chrome ----------
+# Use x11-utils for xdpyinfo (needed by entrypoint to wait for Xvfb)
+# Package names use Debian Trixie (t64) variants where applicable
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg2 \
     ca-certificates \
     xvfb \
     xauth \
+    x11-utils \
     libglib2.0-0 \
     libnss3 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
     libdrm2 \
     libxkbcommon0 \
     libxcomposite1 \
     libxdamage1 \
     libxrandr2 \
     libgbm1 \
-    libasound2 \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
     fonts-liberation \
-    libappindicator3-1 \
-    libgtk-3-0 \
     --no-install-recommends \
     && wget -q -O /usr/share/keyrings/google-chrome.gpg https://dl.google.com/linux/linux_signing_key.pub \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
@@ -49,6 +46,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # ---------- app code ----------
 COPY . .
+RUN chmod +x /app/entrypoint.sh
 
 # ---------- runtime ----------
 ENV PYTHONUNBUFFERED=1
@@ -56,6 +54,4 @@ ENV DISPLAY=:99
 
 EXPOSE 8000
 
-# Start Xvfb (needed by pyvirtualdisplay) then launch the API
-CMD Xvfb :99 -screen 0 1366x768x24 -ac +extension GLX +render -noreset & \
-    uvicorn shopping_agent.api:app --host 0.0.0.0 --port ${PORT:-8000}
+ENTRYPOINT ["/app/entrypoint.sh"]
