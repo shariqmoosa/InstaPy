@@ -5,7 +5,9 @@
   "description": "Instantly reveal hidden delivery, service fees and taxes on any shopping page.",
   "permissions": ["storage", "activeTab"],
   "host_permissions": [
-    "https://generativelanguage.googleapis.com/*"
+    "https://generativelanguage.googleapis.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "action": {
     "default_popup": "popup.html"

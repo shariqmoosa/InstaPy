@@ -1,8 +1,5 @@
 "use strict";
 
-const GEMINI_MODEL = "gemini-2.0-flash";
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
-
 const $ = (id) => document.getElementById(id);
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
@@ -17,36 +14,27 @@ function showError(msg) {
   $("analyze-btn").disabled = false;
 }
 
-// ── Gemini API ────────────────────────────────────────────────────────────────
+// ── Ollama API ────────────────────────────────────────────────────────────────
 
-async function callGemini(apiKey, pageText, url) {
-  const prompt = `You are analyzing a shopping or food-delivery page to find ALL fees a customer would pay.
-
-Page URL: ${url}
-Page content:
----
-${pageText}
----
-
-Return ONLY a valid JSON object — no markdown, no explanation — with this exact shape:
-{
-  "store": "<store or restaurant name, or null>",
-  "item_total": "<subtotal of items, or null>",
-  "delivery_fee": "<delivery fee, or null>",
-  "service_fee": "<service or platform fee, or null>",
-  "taxes": "<tax amount or percentage, or null>",
-  "tip": "<tip amount or options, or null>",
-  "other_fees": [{"name": "<fee name>", "amount": "<amount>"}],
-  "order_total": "<grand total if shown, or null>",
-  "notes": "<any important caveats, promotions, or missing info — keep short>"
+async function callOllama(model, prompt) {
+  const resp = await fetch("http://localhost:11434/api/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model, prompt, stream: false }),
+  });
+  if (!resp.ok) throw new Error(`Ollama error: HTTP ${resp.status}. Is Ollama running?`);
+  const data = await resp.json();
+  const raw = data.response || "";
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  return JSON.parse(cleaned);
 }
 
-Rules:
-- If a value is not visible on the page, use null (not "N/A" or "unknown").
-- other_fees should only contain fees not already captured above (e.g. small order fee, bag fee).
-- amounts should include the currency symbol if shown.`;
+// ── Gemini API ────────────────────────────────────────────────────────────────
 
-  const resp = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
+async function callGemini(apiKey, prompt) {
+  const model = "gemini-2.0-flash";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -54,19 +42,40 @@ Rules:
       generationConfig: { temperature: 0.1, maxOutputTokens: 512 },
     }),
   });
-
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}));
-    const msg = err?.error?.message || `HTTP ${resp.status}`;
-    throw new Error(`Gemini API error: ${msg}`);
+    throw new Error(`Gemini API error: ${err?.error?.message || `HTTP ${resp.status}`}`);
   }
-
   const data = await resp.json();
   const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
-  // Strip markdown code fences if present
   const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
   return JSON.parse(cleaned);
+}
+
+// ── Shared prompt ─────────────────────────────────────────────────────────────
+
+function buildPrompt(pageText, url) {
+  return `You are analyzing a shopping or food-delivery page to find ALL fees.
+
+Page URL: ${url}
+Page content:
+---
+${pageText}
+---
+
+Return ONLY a valid JSON object — no markdown, no explanation:
+{
+  "store": "<store name or null>",
+  "item_total": "<subtotal or null>",
+  "delivery_fee": "<delivery fee or null>",
+  "service_fee": "<service/platform fee or null>",
+  "taxes": "<tax amount or null>",
+  "tip": "<tip or null>",
+  "other_fees": [{"name": "<fee name>", "amount": "<amount>"}],
+  "order_total": "<grand total or null>",
+  "notes": "<short caveats or null>"
+}
+If a value is not visible, use null.`;
 }
 
 // ── Render results ────────────────────────────────────────────────────────────
@@ -75,11 +84,11 @@ function renderResults(result) {
   $("store-name").textContent = result.store || "Fee Breakdown";
 
   const rows = [
-    ["Items",        result.item_total],
-    ["Delivery",     result.delivery_fee],
-    ["Service fee",  result.service_fee],
-    ["Taxes",        result.taxes],
-    ["Tip",          result.tip],
+    ["Items",       result.item_total],
+    ["Delivery",    result.delivery_fee],
+    ["Service fee", result.service_fee],
+    ["Taxes",       result.taxes],
+    ["Tip",         result.tip],
     ...(result.other_fees || []).map(f => [f.name, f.amount]),
   ];
 
@@ -119,18 +128,18 @@ function renderResults(result) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const { geminiApiKey } = await chrome.storage.sync.get("geminiApiKey");
+  const { provider, ollamaModel, geminiApiKey } =
+    await chrome.storage.sync.get(["provider", "ollamaModel", "geminiApiKey"]);
 
-  // Get current tab info
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const url = tab?.url || "";
   const hostname = url ? new URL(url).hostname.replace(/^www\./, "") : "—";
   $("site-label").textContent = hostname;
 
-  if (!geminiApiKey) {
-    hide("analyze-btn");
-    show("no-key");
-    return;
+  const activeProvider = provider || "ollama";
+
+  if (activeProvider === "gemini" && !geminiApiKey) {
+    hide("analyze-btn"); show("no-key"); return;
   }
 
   $("analyze-btn").addEventListener("click", async () => {
@@ -139,11 +148,19 @@ async function main() {
     show("loading");
 
     try {
-      // Ask content script for page text
       const response = await chrome.tabs.sendMessage(tab.id, { type: "GET_PAGE_DATA" });
-      if (!response?.pageText) throw new Error("Could not read page content.");
+      if (!response?.pageText) throw new Error("Could not read page content. Try refreshing the page.");
 
-      const result = await callGemini(geminiApiKey, response.pageText, response.url);
+      const prompt = buildPrompt(response.pageText, response.url);
+      let result;
+
+      if (activeProvider === "ollama") {
+        const model = ollamaModel || "llama3.2";
+        result = await callOllama(model, prompt);
+      } else {
+        result = await callGemini(geminiApiKey, prompt);
+      }
+
       renderResults(result);
     } catch (err) {
       showError(err.message || "Something went wrong.");
@@ -151,9 +168,7 @@ async function main() {
   });
 }
 
-// ── Settings button + link ────────────────────────────────────────────────────
-
 $("settings-btn").addEventListener("click", () => chrome.runtime.openOptionsPage());
-$("open-settings")?.addEventListener("click",  () => chrome.runtime.openOptionsPage());
+$("open-settings")?.addEventListener("click", () => chrome.runtime.openOptionsPage());
 
 main();

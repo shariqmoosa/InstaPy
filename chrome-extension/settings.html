@@ -17,8 +17,7 @@
       padding: 48px 16px;
     }
     .card {
-      width: 100%;
-      max-width: 420px;
+      width: 100%; max-width: 420px;
       background: #17171f;
       border: 1px solid #1e1e28;
       border-radius: 16px;
@@ -34,12 +33,33 @@
     }
     .logo-text { font-size: 18px; font-weight: 700; }
 
-    h2 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
-    p  { font-size: 13px; color: #666; line-height: 1.6; margin-bottom: 20px; }
-    p a { color: #7c6fe0; }
+    h2 { font-size: 15px; font-weight: 600; margin-bottom: 14px; }
+
+    .provider-tabs {
+      display: flex; gap: 8px; margin-bottom: 20px;
+    }
+    .tab-btn {
+      flex: 1; padding: 9px;
+      background: #0f0f11;
+      border: 1px solid #2a2a35;
+      border-radius: 8px;
+      color: #666; font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: all .15s;
+    }
+    .tab-btn.active {
+      background: linear-gradient(135deg, #7c6fe0, #5b8dee);
+      border-color: transparent;
+      color: #fff;
+    }
+
+    .section { display: none; }
+    .section.active { display: block; }
 
     label { display: block; font-size: 12px; color: #888; margin-bottom: 6px; }
-    input[type="password"], input[type="text"] {
+    p { font-size: 12px; color: #555; line-height: 1.6; margin-bottom: 14px; }
+    p a { color: #7c6fe0; }
+
+    input[type="text"], input[type="password"] {
       width: 100%;
       padding: 10px 12px;
       background: #0f0f11;
@@ -49,38 +69,32 @@
       font-size: 14px;
       outline: none;
       transition: border-color .15s;
+      margin-bottom: 14px;
     }
     input:focus { border-color: #7c6fe0; }
 
-    .row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .row { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+    .row input { margin-bottom: 0; }
     .show-btn {
       background: none; border: 1px solid #2a2a35; border-radius: 8px;
-      color: #666; font-size: 12px; padding: 6px 10px; cursor: pointer;
+      color: #666; font-size: 12px; padding: 10px; cursor: pointer;
       white-space: nowrap;
     }
-    .show-btn:hover { color: #aaa; border-color: #444; }
+    .show-btn:hover { color: #aaa; }
 
     .save-btn {
-      margin-top: 20px;
-      width: 100%;
-      padding: 11px;
+      width: 100%; padding: 11px;
       background: linear-gradient(135deg, #7c6fe0, #5b8dee);
-      color: #fff;
-      font-size: 14px;
-      font-weight: 600;
-      border: none;
-      border-radius: 10px;
-      cursor: pointer;
-      transition: opacity .15s;
+      color: #fff; font-size: 14px; font-weight: 600;
+      border: none; border-radius: 10px;
+      cursor: pointer; transition: opacity .15s;
+      margin-top: 4px;
     }
     .save-btn:hover { opacity: 0.88; }
 
     #status {
-      margin-top: 12px;
-      font-size: 13px;
-      text-align: center;
-      min-height: 20px;
-      color: #4caf82;
+      margin-top: 12px; font-size: 13px;
+      text-align: center; min-height: 20px; color: #4caf82;
     }
     #status.error { color: #f08080; }
   </style>
@@ -92,17 +106,36 @@
       <span class="logo-text">Fee Checker</span>
     </div>
 
-    <h2>Gemini API Key</h2>
-    <p>
-      Get a free key at
-      <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com</a>.
-      Your key is stored locally in Chrome and never sent anywhere except Google's API.
-    </p>
+    <h2>AI Provider</h2>
 
-    <label for="api-key">API Key</label>
-    <div class="row">
-      <input type="password" id="api-key" placeholder="AIza…" autocomplete="off" />
-      <button class="show-btn" id="toggle-vis">Show</button>
+    <div class="provider-tabs">
+      <button class="tab-btn active" data-provider="ollama">🦙 Ollama (Local)</button>
+      <button class="tab-btn" data-provider="gemini">✨ Gemini (API)</button>
+    </div>
+
+    <!-- Ollama section -->
+    <div class="section active" id="section-ollama">
+      <p>
+        Runs on your machine — free, private, no API key needed.<br/>
+        Install: <a href="https://ollama.com" target="_blank">ollama.com</a>
+        then run <code>ollama pull llama3.2</code>
+      </p>
+      <label for="ollama-model">Model name</label>
+      <input type="text" id="ollama-model" placeholder="llama3.2" />
+      <p style="margin-top:-10px">Other options: <code>mistral</code>, <code>llama3.1</code>, <code>phi3</code></p>
+    </div>
+
+    <!-- Gemini section -->
+    <div class="section" id="section-gemini">
+      <p>
+        Get a free API key at
+        <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com</a>.
+      </p>
+      <label for="api-key">Gemini API Key</label>
+      <div class="row">
+        <input type="password" id="api-key" placeholder="AIza…" autocomplete="off" />
+        <button class="show-btn" id="toggle-vis">Show</button>
+      </div>
     </div>
 
     <button class="save-btn" id="save-btn">Save</button>
