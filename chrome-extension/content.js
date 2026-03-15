@@ -15,6 +15,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     stopRecording();
     return true;
   }
+  if (msg.type === "UPDATE_COUNT") {
+    updateOverlayCount(msg.count);
+    return true;
+  }
+  if (msg.type === "RECORDING_SAVED") {
+    showSavedState(msg.store, msg.stepCount);
+    return true;
+  }
   if (msg.type === "REPLAY_DONE") {
     showToast("✅ Replay done — analyzing fees…");
     return true;
@@ -135,8 +143,27 @@ function injectOverlay() {
   document.body.appendChild(_overlay);
   document.getElementById("_fc_stop").addEventListener("click", () => {
     chrome.runtime.sendMessage({ type: "STOP_RECORDING" });
-    stopRecording();
-    showToast("✅ Recording saved!");
+    _recording = false; // stop capturing clicks immediately
+  });
+}
+
+function showSavedState(store, stepCount) {
+  // Replace overlay content with "next step" instructions
+  if (!_overlay) return;
+  _overlay.innerHTML = `
+    <span style="margin-right:10px">
+      ✅ <b>${stepCount} steps</b> saved for <b>${store}</b>
+      &nbsp;·&nbsp;
+      <span style="color:#aaa">Click the extension icon → Recordings → ▶ Run to auto-analyze next time</span>
+    </span>
+    <button id="_fc_dismiss" style="
+      background:#333;color:#ccc;border:none;padding:5px 12px;
+      border-radius:6px;cursor:pointer;font-size:13px;">
+      Dismiss
+    </button>`;
+  document.getElementById("_fc_dismiss").addEventListener("click", () => {
+    chrome.runtime.sendMessage({ type: "DISMISS_OVERLAY" });
+    removeOverlay();
   });
 }
 
