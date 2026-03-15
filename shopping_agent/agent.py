@@ -42,18 +42,22 @@ structured data, then provide a brief summary of what you found."""
 
 
 class ShoppingAgent:
-    def __init__(self, api_key=None, headless=True, max_iterations=25, model="claude-sonnet-4-6"):
+    def __init__(self, api_key=None, headless=True, max_iterations=25,
+                 model="claude-sonnet-4-6", cookie_dir=None):
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not self.api_key:
             raise ValueError("ANTHROPIC_API_KEY is required (pass api_key or set env var)")
         self.headless = headless
         self.max_iterations = max_iterations
         self.model = model
+        self.cookie_dir = cookie_dir
         self._client = anthropic.Anthropic(api_key=self.api_key)
 
     def get_pricing(self, product_url, zip_code=None):
         """
         Navigate to a product, add to cart, and extract full pricing breakdown.
+        Loads saved cookies for the domain (if any) to appear as a returning user.
+        Saves cookies after the session to build up a real-user profile over time.
 
         Args:
             product_url: URL of the product page
@@ -62,16 +66,34 @@ class ShoppingAgent:
         Returns:
             PricingResult with full pricing breakdown
         """
-        browser = Browser(headless=self.headless)
+        browser = Browser(headless=self.headless, cookie_dir=self.cookie_dir)
         browser.start()
 
         try:
-            return self._run_agent(browser, product_url, zip_code)
+            # Load cookies first so the site sees a returning human visitor
+            had_cookies = browser.navigate_with_cookies(product_url)
+            if had_cookies:
+                print(f"[ShoppingAgent] Loaded existing cookies — appearing as returning user")
+            else:
+                print(f"[ShoppingAgent] No saved cookies — fresh session, will save after")
+
+            result = self._run_agent(browser, product_url, zip_code)
         finally:
+            # Always save cookies so the next run looks more human
+            try:
+                browser.save_cookies(product_url)
+            except Exception:
+                pass
             browser.quit()
 
+        return result
+
     def _run_agent(self, browser, product_url, zip_code):
-        user_message = f"Get full pricing breakdown for this product: {product_url}"
+        user_message = (
+            f"The browser is already on {product_url} with cookies loaded. "
+            f"Get the full pricing breakdown — add the item to cart and proceed "
+            f"through checkout to reveal all fees."
+        )
         if zip_code:
             user_message += f"\nUse ZIP code {zip_code} for shipping calculation."
 

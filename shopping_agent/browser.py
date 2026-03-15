@@ -3,10 +3,16 @@
 Uses undetected-chromedriver + selenium-stealth to avoid bot detection
 on sites like Uber Eats, DoorDash, Amazon, etc. that use Cloudflare
 or fingerprint-based blocking.
+
+Cookie persistence: cookies and localStorage are saved per-domain so the
+browser looks like a returning human visitor on every run.
 """
 import base64
+import json
+import os
 import random
 import time
+from urllib.parse import urlparse
 
 from pyvirtualdisplay import Display
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException
@@ -37,6 +43,46 @@ Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
 window.chrome = {runtime: {}};
 """
 
+# Common cookie consent button selectors (ordered most-specific first)
+_CONSENT_SELECTORS = [
+    # OneTrust (very common — Uber Eats, many others)
+    "#onetrust-accept-btn-handler",
+    # Cookiebot
+    "#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll",
+    # Cookie Consent (osano)
+    ".cc-btn.cc-allow",
+    # TrustArc
+    ".truste_popframe .pdynamicbutton a",
+    # Quantcast
+    ".qc-cmp2-summary-buttons button:last-child",
+    # Generic patterns
+    "[data-testid='accept-cookies']",
+    "[data-testid='cookie-accept']",
+    "[aria-label='Accept cookies']",
+    "#accept-cookies",
+    "#cookie-accept",
+    ".accept-cookies",
+    ".cookie-accept",
+    "[id*='cookie'][id*='accept']",
+    "[class*='cookie'][class*='accept']",
+]
+
+# XPath fallbacks for text-based consent buttons
+_CONSENT_XPATHS = [
+    "//button[translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='accept all']",
+    "//button[translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='accept all cookies']",
+    "//button[translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='allow all']",
+    "//button[translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='allow all cookies']",
+    "//button[translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='accept']",
+    "//button[translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='i accept']",
+    "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'accept all')]",
+    "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'got it')]",
+    "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'agree')]",
+]
+
+# Default cookie storage directory
+_DEFAULT_COOKIE_DIR = os.path.join(os.path.expanduser("~"), ".shopping_agent", "cookies")
+
 
 def _human_delay(min_ms=80, max_ms=220):
     """Sleep for a random human-like interval."""
@@ -50,12 +96,24 @@ def _slow_type(element, text):
         time.sleep(random.uniform(0.04, 0.18))
 
 
+def _domain_from_url(url):
+    """Extract a clean domain key from a URL, e.g. 'ubereats.com'."""
+    parsed = urlparse(url)
+    host = parsed.netloc or parsed.path
+    # strip www.
+    if host.startswith("www."):
+        host = host[4:]
+    return host.split(":")[0]  # remove port
+
+
 class Browser:
-    def __init__(self, headless=True, timeout=20):
+    def __init__(self, headless=True, timeout=20, cookie_dir=None):
         self.timeout = timeout
         self._display = None
         self._driver = None
         self._headless = headless
+        self.cookie_dir = cookie_dir or _DEFAULT_COOKIE_DIR
+        os.makedirs(self.cookie_dir, exist_ok=True)
 
     def start(self):
         if self._headless:
@@ -96,10 +154,8 @@ class Browser:
         options = uc.ChromeOptions()
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--window-size=1366,768")
         options.add_argument("--lang=en-US")
         options.add_argument("--disable-notifications")
-        # Randomise window size slightly so every session looks different
         w = random.randint(1280, 1440)
         h = random.randint(720, 900)
         options.add_argument(f"--window-size={w},{h}")
@@ -127,14 +183,181 @@ class Browser:
         return driver
 
     # ------------------------------------------------------------------
+    # Cookie persistence
+    # ------------------------------------------------------------------
+
+    def _cookie_path(self, domain):
+        safe = domain.replace(".", "_").replace("/", "_")
+        return os.path.join(self.cookie_dir, f"{safe}.json")
+
+    def _local_storage_path(self, domain):
+        safe = domain.replace(".", "_").replace("/", "_")
+        return os.path.join(self.cookie_dir, f"{safe}_localstorage.json")
+
+    def load_cookies(self, url):
+        """
+        Load saved cookies and localStorage for the domain into the browser.
+
+        Must be called AFTER navigating to the domain's root page so the
+        browser is on the correct origin before adding cookies.
+        Returns True if cookies were found and loaded, False otherwise.
+        """
+        domain = _domain_from_url(url)
+        cookie_path = self._cookie_path(domain)
+        ls_path = self._local_storage_path(domain)
+        loaded = False
+
+        # Load HTTP cookies
+        if os.path.exists(cookie_path):
+            try:
+                with open(cookie_path) as f:
+                    cookies = json.load(f)
+                self._driver.delete_all_cookies()
+                for cookie in cookies:
+                    # Remove keys Selenium can't set
+                    cookie.pop("expiry", None)
+                    cookie.pop("sameSite", None)
+                    try:
+                        self._driver.add_cookie(cookie)
+                    except Exception:
+                        continue
+                loaded = True
+                print(f"[Browser] Loaded {len(cookies)} cookies for {domain}")
+            except Exception as e:
+                print(f"[Browser] Could not load cookies for {domain}: {e}")
+
+        # Restore localStorage
+        if os.path.exists(ls_path):
+            try:
+                with open(ls_path) as f:
+                    ls_data = json.load(f)
+                for key, value in ls_data.items():
+                    self._driver.execute_script(
+                        "window.localStorage.setItem(arguments[0], arguments[1]);",
+                        key, value,
+                    )
+                print(f"[Browser] Restored {len(ls_data)} localStorage keys for {domain}")
+            except Exception as e:
+                print(f"[Browser] Could not restore localStorage for {domain}: {e}")
+
+        return loaded
+
+    def save_cookies(self, url):
+        """
+        Persist the current browser's cookies and localStorage for the domain.
+        Call this after a successful session to build up a real-user cookie profile.
+        """
+        domain = _domain_from_url(url)
+        cookie_path = self._cookie_path(domain)
+        ls_path = self._local_storage_path(domain)
+
+        # Save HTTP cookies
+        try:
+            cookies = self._driver.get_cookies()
+            with open(cookie_path, "w") as f:
+                json.dump(cookies, f, indent=2)
+            print(f"[Browser] Saved {len(cookies)} cookies for {domain}")
+        except Exception as e:
+            print(f"[Browser] Could not save cookies for {domain}: {e}")
+
+        # Save localStorage
+        try:
+            ls_data = self._driver.execute_script(
+                "var items = {}; "
+                "for (var i = 0; i < window.localStorage.length; i++) {"
+                "  var k = window.localStorage.key(i);"
+                "  items[k] = window.localStorage.getItem(k);"
+                "} return items;"
+            )
+            if ls_data:
+                with open(ls_path, "w") as f:
+                    json.dump(ls_data, f, indent=2)
+                print(f"[Browser] Saved {len(ls_data)} localStorage keys for {domain}")
+        except Exception as e:
+            print(f"[Browser] Could not save localStorage for {domain}: {e}")
+
+    def accept_cookie_consent(self):
+        """
+        Try to click cookie/GDPR consent banners automatically.
+        Tries a battery of known selectors and XPath patterns.
+        Returns True if a banner was dismissed, False if none found.
+        """
+        _human_delay(600, 1200)
+
+        # Try CSS selectors first
+        for selector in _CONSENT_SELECTORS:
+            try:
+                el = WebDriverWait(self._driver, 3).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                )
+                ActionChains(self._driver).move_to_element(el).perform()
+                _human_delay(200, 500)
+                el.click()
+                _human_delay(500, 1000)
+                print(f"[Browser] Accepted cookie consent via: {selector}")
+                return True
+            except (TimeoutException, NoSuchElementException, WebDriverException):
+                continue
+
+        # Try XPath text-based patterns
+        for xpath in _CONSENT_XPATHS:
+            try:
+                el = WebDriverWait(self._driver, 2).until(
+                    EC.element_to_be_clickable((By.XPATH, xpath))
+                )
+                ActionChains(self._driver).move_to_element(el).perform()
+                _human_delay(200, 500)
+                el.click()
+                _human_delay(500, 1000)
+                print(f"[Browser] Accepted cookie consent via XPath")
+                return True
+            except (TimeoutException, NoSuchElementException, WebDriverException):
+                continue
+
+        return False
+
+    def has_cookies_for(self, url):
+        """Return True if a saved cookie file exists for this domain."""
+        domain = _domain_from_url(url)
+        return os.path.exists(self._cookie_path(domain))
+
+    # ------------------------------------------------------------------
     # Navigation
     # ------------------------------------------------------------------
 
     def navigate(self, url):
         self._driver.get(url)
-        # Wait for page load + extra random delay to mimic human reading time
         self._wait_for_page_load()
         _human_delay(800, 1800)
+
+    def navigate_with_cookies(self, url):
+        """
+        Navigate to a URL with full cookie restoration:
+        1. Go to the domain root to establish origin
+        2. Inject saved cookies + localStorage
+        3. Reload to the actual URL as a "returning user"
+        Returns True if existing cookies were loaded, False if fresh session.
+        """
+        parsed = urlparse(url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+
+        # Step 1: land on the domain (needed before we can set cookies)
+        self._driver.get(origin)
+        self._wait_for_page_load()
+        _human_delay(400, 800)
+
+        # Step 2: inject saved cookies
+        had_cookies = self.load_cookies(url)
+
+        # Step 3: navigate to actual URL — browser now looks like a returning visitor
+        self._driver.get(url)
+        self._wait_for_page_load()
+        _human_delay(800, 1800)
+
+        # Step 4: accept any consent banner (builds up more cookies)
+        self.accept_cookie_consent()
+
+        return had_cookies
 
     def _wait_for_page_load(self, timeout=30):
         try:
@@ -210,7 +433,6 @@ class Browser:
             )
             self._driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
             _human_delay(300, 700)
-            # Move mouse to element before clicking (avoids "robot teleport" signals)
             ActionChains(self._driver).move_to_element(el).perform()
             _human_delay(100, 300)
             el.click()
