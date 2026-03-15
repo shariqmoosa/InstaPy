@@ -8,3 +8,5 @@ undetected-chromedriver
 selenium-stealth
 openai
 google-generativeai
+fastapi
+uvicorn[standard]
