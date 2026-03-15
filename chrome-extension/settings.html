@@ -116,10 +116,11 @@
     <!-- Ollama section -->
     <div class="section active" id="section-ollama">
       <p>
-        Runs on your machine — free, private, no API key needed.<br/>
-        Install: <a href="https://ollama.com" target="_blank">ollama.com</a>
-        then run <code>ollama pull llama3.2</code>
+        Use Ollama cloud (API key) or run locally for free.<br/>
+        Get a cloud key at <a href="https://ollama.com" target="_blank">ollama.com</a>
       </p>
+      <label for="ollama-api-key">Ollama API Key <span style="color:#555">(leave blank for local)</span></label>
+      <input type="text" id="ollama-api-key" placeholder="leave blank to use local Ollama" />
       <label for="ollama-model">Model name</label>
       <input type="text" id="ollama-model" placeholder="llama3.2" />
       <p style="margin-top:-10px">Other options: <code>mistral</code>, <code>llama3.1</code>, <code>phi3</code></p>

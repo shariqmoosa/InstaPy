@@ -6,6 +6,7 @@
   "permissions": ["storage", "activeTab"],
   "host_permissions": [
     "https://generativelanguage.googleapis.com/*",
+    "https://ollama.com/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
   ],

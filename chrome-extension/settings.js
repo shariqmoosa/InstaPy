@@ -4,16 +4,18 @@ const saveBtn   = document.getElementById("save-btn");
 const status    = document.getElementById("status");
 const toggleBtn = document.getElementById("toggle-vis");
 const apiKeyInput    = document.getElementById("api-key");
-const ollamaModelInput = document.getElementById("ollama-model");
+const ollamaModelInput  = document.getElementById("ollama-model");
+const ollamaApiKeyInput = document.getElementById("ollama-api-key");
 const tabBtns   = document.querySelectorAll(".tab-btn");
 
 let activeProvider = "ollama";
 
 // ── Load saved settings ───────────────────────────────────────────────────────
-chrome.storage.sync.get(["provider", "ollamaModel", "geminiApiKey"], (data) => {
+chrome.storage.sync.get(["provider", "ollamaModel", "ollamaApiKey", "geminiApiKey"], (data) => {
   activeProvider = data.provider || "ollama";
   setProvider(activeProvider);
-  if (data.ollamaModel) ollamaModelInput.value = data.ollamaModel;
+  if (data.ollamaModel)  ollamaModelInput.value  = data.ollamaModel;
+  if (data.ollamaApiKey) ollamaApiKeyInput.value = data.ollamaApiKey;
   if (data.geminiApiKey) apiKeyInput.value = data.geminiApiKey;
 });
 
@@ -39,7 +41,8 @@ saveBtn.addEventListener("click", () => {
   const data = { provider: activeProvider };
 
   if (activeProvider === "ollama") {
-    data.ollamaModel = ollamaModelInput.value.trim() || "llama3.2";
+    data.ollamaModel  = ollamaModelInput.value.trim() || "llama3.2";
+    data.ollamaApiKey = ollamaApiKeyInput.value.trim();
   } else {
     const key = apiKeyInput.value.trim();
     if (!key) { status.textContent = "Please enter an API key."; status.className = "error"; return; }

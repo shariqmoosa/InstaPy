@@ -16,13 +16,21 @@ function showError(msg) {
 
 // ── Ollama API ────────────────────────────────────────────────────────────────
 
-async function callOllama(model, prompt) {
-  const resp = await fetch("http://localhost:11434/api/generate", {
+async function callOllama(model, prompt, apiKey) {
+  // Use cloud if API key is provided, otherwise local
+  const baseUrl = apiKey
+    ? "https://ollama.com"
+    : "http://localhost:11434";
+
+  const headers = { "Content-Type": "application/json" };
+  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+
+  const resp = await fetch(`${baseUrl}/api/generate`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ model, prompt, stream: false }),
   });
-  if (!resp.ok) throw new Error(`Ollama error: HTTP ${resp.status}. Is Ollama running?`);
+  if (!resp.ok) throw new Error(`Ollama error: HTTP ${resp.status}`);
   const data = await resp.json();
   const raw = data.response || "";
   const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
@@ -128,8 +136,8 @@ function renderResults(result) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const { provider, ollamaModel, geminiApiKey } =
-    await chrome.storage.sync.get(["provider", "ollamaModel", "geminiApiKey"]);
+  const data = await chrome.storage.sync.get(["provider", "ollamaModel", "ollamaApiKey", "geminiApiKey"]);
+  const { provider, ollamaModel, geminiApiKey } = data;
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const url = tab?.url || "";
@@ -156,7 +164,7 @@ async function main() {
 
       if (activeProvider === "ollama") {
         const model = ollamaModel || "llama3.2";
-        result = await callOllama(model, prompt);
+        result = await callOllama(model, prompt, data.ollamaApiKey);
       } else {
         result = await callGemini(geminiApiKey, prompt);
       }
