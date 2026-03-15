@@ -1,15 +1,19 @@
 {
   "manifest_version": 3,
   "name": "Fee Checker",
-  "version": "1.0",
-  "description": "Instantly reveal hidden delivery, service fees and taxes on any shopping page.",
-  "permissions": ["storage", "activeTab"],
+  "version": "1.1",
+  "description": "Instantly reveal hidden delivery, service fees and taxes on any shopping page. Train it once per store — it navigates automatically next time.",
+  "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": [
     "https://generativelanguage.googleapis.com/*",
     "https://ollama.com/*",
     "http://localhost/*",
-    "http://127.0.0.1/*"
+    "http://127.0.0.1/*",
+    "<all_urls>"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html"
   },

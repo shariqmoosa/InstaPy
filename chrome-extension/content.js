@@ -1,38 +1,163 @@
-// Content script — runs in the context of every page.
-// Listens for a message from popup.js requesting page data,
-// then returns the page text and metadata.
+"use strict";
 
-chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-  if (request.type !== "GET_PAGE_DATA") return;
+// ── Page data extraction (used by popup Analyze) ──────────────────────────────
 
-  // Extract visible text — skip script/style nodes
-  function extractText(node, parts) {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === "GET_PAGE_DATA") {
+    sendResponse({ url: location.href, title: document.title, pageText: extractText() });
+    return true;
+  }
+  if (msg.type === "RECORDING_START") {
+    startRecording();
+    return true;
+  }
+  if (msg.type === "RECORDING_STOP") {
+    stopRecording();
+    return true;
+  }
+  if (msg.type === "REPLAY_DONE") {
+    showToast("✅ Replay done — analyzing fees…");
+    return true;
+  }
+});
+
+// ── Text extraction ───────────────────────────────────────────────────────────
+
+function extractText() {
+  const parts = [];
+  const seen = new Set();
+  function walk(node) {
     if (!node) return;
     if (node.nodeType === Node.TEXT_NODE) {
       const t = node.textContent.trim();
-      if (t) parts.push(t);
+      if (t && !seen.has(t)) { seen.add(t); parts.push(t); }
       return;
     }
-    const tag = node.tagName && node.tagName.toLowerCase();
+    const tag = node.tagName?.toLowerCase();
     if (tag === "script" || tag === "style" || tag === "noscript") return;
-    for (const child of node.childNodes) extractText(child, parts);
+    for (const child of node.childNodes) walk(child);
   }
+  walk(document.body);
+  return parts.join("\n").slice(0, 12000);
+}
 
+// ── Recording ─────────────────────────────────────────────────────────────────
+
+let _recording = false;
+let _lastUrl = location.href;
+let _overlay = null;
+let _stepCount = 0;
+
+function getBestSelector(el) {
+  if (!el || el === document.body) return null;
+  if (el.id) return `#${CSS.escape(el.id)}`;
+  const testid = el.getAttribute("data-testid");
+  if (testid) return `[data-testid="${testid}"]`;
+  const aria = el.getAttribute("aria-label");
+  if (aria) return `[aria-label="${aria}"]`;
+  // Build a short CSS path (up to 3 levels)
   const parts = [];
-  extractText(document.body, parts);
-  // Deduplicate adjacent identical lines and limit size
-  const seen = new Set();
-  const lines = [];
-  for (const p of parts) {
-    if (!seen.has(p)) { seen.add(p); lines.push(p); }
+  let cur = el;
+  for (let i = 0; i < 3 && cur && cur !== document.body; i++) {
+    let seg = cur.tagName.toLowerCase();
+    if (cur.className) {
+      const cls = [...cur.classList].slice(0, 2).join(".");
+      if (cls) seg += "." + cls;
+    }
+    parts.unshift(seg);
+    cur = cur.parentElement;
   }
-  const pageText = lines.join("\n").slice(0, 12000);
+  return parts.join(" > ");
+}
 
-  sendResponse({
+document.addEventListener("click", (e) => {
+  if (!_recording) return;
+  if (e.target.closest("#_fc_overlay")) return; // ignore clicks on our overlay
+  const step = {
+    type: "click",
     url: location.href,
-    title: document.title,
-    pageText,
-  });
+    selector: getBestSelector(e.target),
+    text: (e.target.innerText || e.target.textContent || "").trim().slice(0, 80),
+  };
+  chrome.runtime.sendMessage({ type: "RECORD_STEP", step });
+  _stepCount++;
+  updateOverlayCount(_stepCount);
+}, true);
 
-  return true; // keep message channel open for async
+// Detect URL changes (SPA navigation)
+const _navObserver = new MutationObserver(() => {
+  if (location.href !== _lastUrl) {
+    _lastUrl = location.href;
+    if (_recording) {
+      chrome.runtime.sendMessage({ type: "RECORD_STEP", step: { type: "navigate", url: location.href } });
+      _stepCount++;
+      updateOverlayCount(_stepCount);
+    }
+  }
 });
+_navObserver.observe(document.documentElement, { subtree: true, childList: true });
+
+function startRecording() {
+  _recording = true;
+  _stepCount = 0;
+  _lastUrl = location.href;
+  injectOverlay();
+  // Record starting URL
+  chrome.runtime.sendMessage({ type: "RECORD_STEP", step: { type: "navigate", url: location.href } });
+}
+
+function stopRecording() {
+  _recording = false;
+  removeOverlay();
+}
+
+// ── Overlay banner ────────────────────────────────────────────────────────────
+
+function injectOverlay() {
+  if (_overlay) return;
+  _overlay = document.createElement("div");
+  _overlay.id = "_fc_overlay";
+  _overlay.innerHTML = `
+    <span style="margin-right:10px">🔴 Recording <b id="_fc_count">0</b> steps</span>
+    <button id="_fc_stop" style="
+      background:#e53935;color:#fff;border:none;padding:5px 14px;
+      border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">
+      Stop &amp; Save
+    </button>`;
+  Object.assign(_overlay.style, {
+    position: "fixed", top: "0", left: "50%", transform: "translateX(-50%)",
+    zIndex: "2147483647", background: "#1a1a2e", color: "#fff",
+    padding: "10px 20px", borderRadius: "0 0 12px 12px",
+    fontFamily: "sans-serif", fontSize: "14px",
+    display: "flex", alignItems: "center", gap: "8px",
+    boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+  });
+  document.body.appendChild(_overlay);
+  document.getElementById("_fc_stop").addEventListener("click", () => {
+    chrome.runtime.sendMessage({ type: "STOP_RECORDING" });
+    stopRecording();
+    showToast("✅ Recording saved!");
+  });
+}
+
+function removeOverlay() {
+  if (_overlay) { _overlay.remove(); _overlay = null; }
+}
+
+function updateOverlayCount(n) {
+  const el = document.getElementById("_fc_count");
+  if (el) el.textContent = n;
+}
+
+function showToast(msg) {
+  const t = document.createElement("div");
+  t.textContent = msg;
+  Object.assign(t.style, {
+    position: "fixed", bottom: "24px", left: "50%", transform: "translateX(-50%)",
+    background: "#1a1a2e", color: "#fff", padding: "10px 20px",
+    borderRadius: "10px", zIndex: "2147483647", fontFamily: "sans-serif",
+    fontSize: "14px", boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+  });
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}

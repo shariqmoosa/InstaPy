@@ -2,10 +2,22 @@
 
 const $ = (id) => document.getElementById(id);
 
+// ── Tab switching ─────────────────────────────────────────────────────────────
+
+document.querySelectorAll(".tab").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    btn.classList.add("active");
+    $("tab-analyze").style.display = btn.dataset.tab === "analyze" ? "block" : "none";
+    $("tab-record").style.display  = btn.dataset.tab === "record"  ? "block" : "none";
+    if (btn.dataset.tab === "record") renderRecordings();
+  });
+});
+
 // ── UI helpers ────────────────────────────────────────────────────────────────
 
-function show(...ids) { ids.forEach(id => { $(id).style.display = id === "loading" ? "flex" : "block"; }); }
-function hide(...ids) { ids.forEach(id => { $(id).style.display = "none"; }); }
+function show(...ids) { ids.forEach(id => $(id) && ($(id).style.display = id === "loading" ? "flex" : "block")); }
+function hide(...ids) { ids.forEach(id => $(id) && ($(id).style.display = "none")); }
 
 function showError(msg) {
   hide("loading", "results");
@@ -14,45 +26,10 @@ function showError(msg) {
   $("analyze-btn").disabled = false;
 }
 
-// ── Ollama API ────────────────────────────────────────────────────────────────
-
-async function callOllama(model, prompt, apiKey) {
-  const baseUrl = apiKey ? "https://ollama.com" : "http://localhost:11434";
-  const headers = { "Content-Type": "application/json" };
-  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
-
-  let resp;
-  try {
-    resp = await fetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: prompt }],
-        stream: false,
-      }),
-    });
-  } catch (e) {
-    throw new Error(apiKey
-      ? "Could not reach Ollama cloud. Check your API key and model name."
-      : "Could not reach local Ollama. Is it running? (ollama serve)");
-  }
-
-  if (!resp.ok) {
-    const txt = await resp.text().catch(() => "");
-    throw new Error(`Ollama error ${resp.status}: ${txt.slice(0, 120)}`);
-  }
-  const data = await resp.json();
-  const raw = data?.message?.content || data.response || "";
-  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  return JSON.parse(cleaned);
-}
-
 // ── Gemini API ────────────────────────────────────────────────────────────────
 
 async function callGemini(apiKey, prompt) {
-  const model = "gemini-2.0-flash";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
   const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -67,8 +44,33 @@ async function callGemini(apiKey, prompt) {
   }
   const data = await resp.json();
   const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  return JSON.parse(cleaned);
+  return JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim());
+}
+
+// ── Ollama API ────────────────────────────────────────────────────────────────
+
+async function callOllama(model, prompt, apiKey) {
+  const baseUrl = apiKey ? "https://ollama.com" : "http://localhost:11434";
+  const headers = { "Content-Type": "application/json" };
+  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+  let resp;
+  try {
+    resp = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST", headers,
+      body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], stream: false }),
+    });
+  } catch (e) {
+    throw new Error(apiKey
+      ? "Could not reach Ollama cloud. Check your API key and model name."
+      : "Could not reach local Ollama. Is it running? (ollama serve)");
+  }
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => "");
+    throw new Error(`Ollama error ${resp.status}: ${txt.slice(0, 120)}`);
+  }
+  const data = await resp.json();
+  const raw = data?.message?.content || data.response || "";
+  return JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim());
 }
 
 // ── Shared prompt ─────────────────────────────────────────────────────────────
@@ -101,85 +103,124 @@ If a value is not visible, use null.`;
 
 function renderResults(result) {
   $("store-name").textContent = result.store || "Fee Breakdown";
-
   const rows = [
-    ["Items",       result.item_total],
-    ["Delivery",    result.delivery_fee],
-    ["Service fee", result.service_fee],
-    ["Taxes",       result.taxes],
-    ["Tip",         result.tip],
+    ["Items", result.item_total], ["Delivery", result.delivery_fee],
+    ["Service fee", result.service_fee], ["Taxes", result.taxes], ["Tip", result.tip],
     ...(result.other_fees || []).map(f => [f.name, f.amount]),
   ];
-
   const tbody = $("fee-table");
   tbody.innerHTML = "";
-
   for (const [label, amount] of rows) {
-    const tr = document.createElement("tr");
     const isFree = amount && /\b(free|£0|€0|\$0|0\.00)\b/i.test(amount);
-    tr.innerHTML = `
-      <td class="label">${label}</td>
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="label">${label}</td>
       <td class="${amount ? (isFree ? "amount badge-free" : "amount") : "null-amount"}">
-        ${amount ? (isFree ? "Free" : amount) : "—"}
-      </td>`;
+        ${amount ? (isFree ? "Free" : amount) : "—"}</td>`;
     tbody.appendChild(tr);
   }
-
   if (result.order_total) {
     const tr = document.createElement("tr");
     tr.className = "total-row";
     tr.innerHTML = `<td class="label">Total</td><td class="amount">${result.order_total}</td>`;
     tbody.appendChild(tr);
   }
-
   const notesEl = $("notes");
-  if (result.notes) {
-    notesEl.textContent = result.notes;
-    notesEl.style.display = "block";
-  } else {
-    notesEl.style.display = "none";
-  }
-
+  notesEl.style.display = result.notes ? "block" : "none";
+  if (result.notes) notesEl.textContent = result.notes;
   hide("loading", "error-box", "analyze-btn");
   show("results");
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
+// ── Recordings tab ────────────────────────────────────────────────────────────
+
+async function renderRecordings() {
+  const { recordings = {} } = await chrome.storage.local.get("recordings");
+  const list = $("recordings-list");
+  const stores = Object.keys(recordings);
+  if (stores.length === 0) {
+    list.innerHTML = `<div class="rec-empty">No recordings yet.<br/>Start recording on any store page.</div>`;
+    return;
+  }
+  list.innerHTML = stores.map(store => {
+    const rec = recordings[store];
+    const date = new Date(rec.savedAt).toLocaleDateString();
+    return `<div class="rec-item">
+      <div>
+        <div class="rec-store">${store}</div>
+        <div class="rec-meta">${rec.steps.length} steps · ${date}</div>
+      </div>
+      <div class="rec-actions">
+        <button class="rec-btn rec-btn-play" data-store="${store}">▶ Run</button>
+        <button class="rec-btn rec-btn-delete" data-store="${store}">✕</button>
+      </div>
+    </div>`;
+  }).join("");
+
+  list.querySelectorAll(".rec-btn-play").forEach(btn => {
+    btn.addEventListener("click", () => replayRecording(btn.dataset.store, recordings));
+  });
+  list.querySelectorAll(".rec-btn-delete").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      delete recordings[btn.dataset.store];
+      await chrome.storage.local.set({ recordings });
+      renderRecordings();
+    });
+  });
+}
+
+async function replayRecording(store, recordings) {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const steps = recordings[store].steps;
+  $("record-btn").disabled = true;
+  $("record-btn").textContent = "▶ Replaying…";
+  await chrome.runtime.sendMessage({ type: "REPLAY_STEPS", steps, tabId: tab.id });
+
+  // After replay, wait a moment then auto-analyze
+  await new Promise(r => setTimeout(r, 2000));
+  $("record-btn").disabled = false;
+  $("record-btn").textContent = "🔴 Start Recording";
+
+  // Switch to analyze tab and run analysis
+  document.querySelector('[data-tab="analyze"]').click();
+  $("analyze-btn").click();
+}
+
+// ── Start recording ───────────────────────────────────────────────────────────
+
+$("record-btn").addEventListener("click", async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const store = new URL(tab.url).hostname.replace(/^www\./, "");
+  await chrome.runtime.sendMessage({ type: "START_RECORDING", store, tabId: tab.id });
+  window.close(); // close popup — overlay on page takes over
+});
+
+// ── Main (Analyze tab) ────────────────────────────────────────────────────────
 
 async function main() {
-  const data = await chrome.storage.sync.get(["provider", "ollamaModel", "ollamaApiKey", "geminiApiKey"]);
-  const { provider, ollamaModel, geminiApiKey } = data;
-
+  const settings = await chrome.storage.sync.get(["provider", "ollamaModel", "ollamaApiKey", "geminiApiKey"]);
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const url = tab?.url || "";
   const hostname = url ? new URL(url).hostname.replace(/^www\./, "") : "—";
   $("site-label").textContent = hostname;
 
-  const activeProvider = provider || "ollama";
-
-  if (activeProvider === "gemini" && !geminiApiKey) {
-    hide("analyze-btn"); show("no-key"); return;
-  }
+  const provider = settings.provider || "ollama";
+  if (provider === "gemini" && !settings.geminiApiKey) { hide("analyze-btn"); show("no-key"); return; }
 
   $("analyze-btn").addEventListener("click", async () => {
     $("analyze-btn").disabled = true;
     hide("results", "error-box");
+    $("loading-msg").textContent = "Analyzing fees…";
     show("loading");
-
     try {
       const response = await chrome.tabs.sendMessage(tab.id, { type: "GET_PAGE_DATA" });
       if (!response?.pageText) throw new Error("Could not read page content. Try refreshing the page.");
-
       const prompt = buildPrompt(response.pageText, response.url);
       let result;
-
-      if (activeProvider === "ollama") {
-        const model = ollamaModel || "llama3.2";
-        result = await callOllama(model, prompt, data.ollamaApiKey);
+      if (provider === "ollama") {
+        result = await callOllama(settings.ollamaModel || "llama3.2", prompt, settings.ollamaApiKey);
       } else {
-        result = await callGemini(geminiApiKey, prompt);
+        result = await callGemini(settings.geminiApiKey, prompt);
       }
-
       renderResults(result);
     } catch (err) {
       showError(err.message || "Something went wrong.");
