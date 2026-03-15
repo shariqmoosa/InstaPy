@@ -17,22 +17,33 @@ function showError(msg) {
 // ── Ollama API ────────────────────────────────────────────────────────────────
 
 async function callOllama(model, prompt, apiKey) {
-  // Use cloud if API key is provided, otherwise local
-  const baseUrl = apiKey
-    ? "https://ollama.com"
-    : "http://localhost:11434";
-
+  const baseUrl = apiKey ? "https://ollama.com" : "http://localhost:11434";
   const headers = { "Content-Type": "application/json" };
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
-  const resp = await fetch(`${baseUrl}/api/generate`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ model, prompt, stream: false }),
-  });
-  if (!resp.ok) throw new Error(`Ollama error: HTTP ${resp.status}`);
+  let resp;
+  try {
+    resp = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        stream: false,
+      }),
+    });
+  } catch (e) {
+    throw new Error(apiKey
+      ? "Could not reach Ollama cloud. Check your API key and model name."
+      : "Could not reach local Ollama. Is it running? (ollama serve)");
+  }
+
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => "");
+    throw new Error(`Ollama error ${resp.status}: ${txt.slice(0, 120)}`);
+  }
   const data = await resp.json();
-  const raw = data.response || "";
+  const raw = data?.message?.content || data.response || "";
   const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
   return JSON.parse(cleaned);
 }
