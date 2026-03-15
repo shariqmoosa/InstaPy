@@ -1,4 +1,13 @@
 """Tool definitions and handlers for the Claude shopping agent."""
+import json
+
+# Phrases that indicate a final purchase button — never click these
+_DANGER_PHRASES = [
+    "place order", "place your order", "confirm order", "confirm purchase",
+    "submit order", "complete purchase", "complete order",
+    "pay now", "confirm and pay", "confirm & pay",
+    "submit payment", "buy now", "purchase now",
+]
 
 TOOL_SCHEMAS = [
     {
@@ -16,6 +25,7 @@ TOOL_SCHEMAS = [
         "name": "get_page_content",
         "description": (
             "Get the current page's visible text content and current URL. "
+            "Also reports if the page is a bot-block or CAPTCHA page. "
             "Use this to read product names, prices, form fields, and checkout summaries."
         ),
         "input_schema": {
@@ -51,7 +61,8 @@ TOOL_SCHEMAS = [
         "name": "click_element",
         "description": (
             "Click an element identified by a CSS selector or XPath. "
-            "Use for buttons like 'Add to Cart', 'Proceed to Checkout', 'Continue', etc."
+            "Use for buttons like 'Add to Cart', 'Proceed to Checkout', 'Continue', etc. "
+            "Will refuse to click any button that would complete a purchase (Place Order, Pay Now, etc.)."
         ),
         "input_schema": {
             "type": "object",
@@ -90,6 +101,29 @@ TOOL_SCHEMAS = [
                 },
             },
             "required": ["selector", "text"],
+        },
+    },
+    {
+        "name": "scroll_page",
+        "description": (
+            "Scroll the page to reveal lazy-loaded content or bring an element into view. "
+            "Use 'bottom' to scroll to end of page, 'top' to return to top, "
+            "'element' + selector to scroll a specific element into view."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "direction": {
+                    "type": "string",
+                    "enum": ["bottom", "top", "element"],
+                    "description": "Where to scroll",
+                },
+                "selector": {
+                    "type": "string",
+                    "description": "CSS selector — required only when direction='element'",
+                },
+            },
+            "required": ["direction"],
         },
     },
     {
@@ -157,21 +191,39 @@ TOOL_SCHEMAS = [
 ]
 
 
+def _is_dangerous_button(browser, selector, by_xpath=False):
+    """Return True if the element text matches a final-purchase phrase."""
+    elements = browser.find_elements(selector, by_xpath=by_xpath)
+    for el in elements:
+        text = el.get("text", "").lower().strip()
+        if any(phrase in text for phrase in _DANGER_PHRASES):
+            return True
+    return False
+
+
 def handle_tool(name, tool_input, browser):
     """Dispatch a tool call to the browser and return a string result."""
     if name == "navigate_to_url":
         url = tool_input["url"]
         browser.navigate(url)
         current = browser.get_current_url()
+        blocked = browser.is_blocked()
+        if blocked:
+            return (
+                f"Navigated to: {current}\n"
+                "WARNING: Page appears to be a bot-block or CAPTCHA page. "
+                "The site may have detected automation. Try scrolling or waiting."
+            )
         return f"Navigated to: {current}"
 
     elif name == "get_page_content":
         text = browser.get_page_text()
         url = browser.get_current_url()
-        # Truncate to avoid huge context
+        blocked = browser.is_blocked()
         if len(text) > 6000:
             text = text[:6000] + "\n...[truncated]"
-        return f"URL: {url}\n\n{text}"
+        prefix = "BLOCKED: Bot/CAPTCHA page detected.\n\n" if blocked else ""
+        return f"{prefix}URL: {url}\n\n{text}"
 
     elif name == "find_elements":
         selector = tool_input["selector"]
@@ -196,10 +248,21 @@ def handle_tool(name, tool_input, browser):
     elif name == "click_element":
         selector = tool_input["selector"]
         by_xpath = tool_input.get("by_xpath", False)
+        # Safety: block any final purchase button
+        if _is_dangerous_button(browser, selector, by_xpath=by_xpath):
+            return (
+                "BLOCKED: This element appears to be a final purchase/payment button. "
+                "Not clicking it to avoid completing a real order. "
+                "Extract pricing from what is visible and call extract_pricing."
+            )
         result = browser.click(selector, by_xpath=by_xpath)
         if result is True:
             url = browser.get_current_url()
-            return f"Clicked successfully. Current URL: {url}"
+            blocked = browser.is_blocked()
+            msg = f"Clicked successfully. Current URL: {url}"
+            if blocked:
+                msg += "\nWARNING: Page appears to be a bot-block or CAPTCHA page."
+            return msg
         return str(result)
 
     elif name == "type_text":
@@ -211,14 +274,19 @@ def handle_tool(name, tool_input, browser):
             return f"Typed {text!r} into field."
         return str(result)
 
+    elif name == "scroll_page":
+        direction = tool_input.get("direction", "bottom")
+        selector = tool_input.get("selector")
+        browser.scroll(direction=direction, selector=selector)
+        return f"Scrolled {direction}."
+
     elif name == "extract_pricing":
-        # This tool's result is handled specially in agent.py — we just echo it back
-        import json
+        # Handled in agent.py — just echo back for the tool_result
         return json.dumps(tool_input)
 
     elif name == "take_screenshot":
         data = browser.screenshot()
-        if data.startswith("Screenshot failed"):
+        if isinstance(data, str) and data.startswith("Screenshot failed"):
             return data
         return f"Screenshot captured ({len(data)} bytes base64)."
 

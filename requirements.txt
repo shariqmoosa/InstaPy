@@ -4,3 +4,5 @@ pyvirtualdisplay
 emoji
 GitPython
 anthropic
+undetected-chromedriver
+selenium-stealth
