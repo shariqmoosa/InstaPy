@@ -183,10 +183,6 @@ def _to_openai_messages(messages, system_prompt):
 
 def _to_gemini_contents(messages):
     """Convert Anthropic-style messages to Gemini contents format."""
-    try:
-        from google.generativeai.types import content_types
-    except ImportError:
-        raise ImportError("google-generativeai is required")
 
     result = []
     for msg in messages:
@@ -228,7 +224,7 @@ def _to_gemini_contents(messages):
 # ---------------------------------------------------------------------------
 
 class ClaudeClient:
-    def __init__(self, api_key, model="claude-haiku-4-5"):
+    def __init__(self, api_key, model="claude-haiku-4-5-20251001"):
         try:
             import anthropic as _anthropic
         except ImportError:
@@ -356,18 +352,26 @@ class GeminiClient:
 
         blocks = []
         stop = "end_turn"
-        for part in response.parts:
-            if hasattr(part, "text") and part.text:
-                blocks.append({"type": "text", "text": part.text})
-            if hasattr(part, "function_call") and part.function_call.name:
-                fc = part.function_call
-                blocks.append({
-                    "type": "tool_use",
-                    "id": fc.name,   # Gemini doesn't give unique IDs
-                    "name": fc.name,
-                    "input": dict(fc.args),
-                })
-                stop = "tool_use"
+
+        # Guard against blocked/empty responses (safety filter, quota, etc.)
+        candidates = getattr(response, "candidates", None)
+        if not candidates:
+            blocks.append({"type": "text", "text": f"[Gemini returned no candidates: {getattr(response, 'prompt_feedback', '')}]"})
+        else:
+            parts = getattr(candidates[0].content, "parts", []) if candidates[0].content else []
+            for part in parts:
+                if getattr(part, "text", None):
+                    blocks.append({"type": "text", "text": part.text})
+                fc = getattr(part, "function_call", None)
+                if fc and getattr(fc, "name", None):
+                    # Gemini doesn't provide unique IDs — use name + counter
+                    blocks.append({
+                        "type": "tool_use",
+                        "id": fc.name,
+                        "name": fc.name,
+                        "input": dict(fc.args),
+                    })
+                    stop = "tool_use"
 
         try:
             in_tok = response.usage_metadata.prompt_token_count
@@ -405,7 +409,7 @@ COST_TABLE = {
 }
 
 _PROVIDER_DEFAULTS = {
-    "claude":  "claude-haiku-4-5",
+    "claude":  "claude-haiku-4-5-20251001",
     "openai":  "gpt-4o-mini",
     "gemini":  "gemini-1.5-flash",
 }

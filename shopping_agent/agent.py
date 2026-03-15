@@ -55,7 +55,7 @@ class ShoppingAgent:
         self,
         provider="auto",
         api_key=None,
-        model=None,
+        model=None,           # None = use provider default (haiku / gpt-4o-mini / gemini-flash)
         headless=True,
         max_iterations=25,
         cookie_dir=None,
@@ -65,7 +65,8 @@ class ShoppingAgent:
         Args:
             provider:  "claude" | "openai" | "gemini" | "auto"
             api_key:   API key for the chosen provider
-            model:     Model name override (e.g. "gpt-4o", "gemini-1.5-pro")
+            model:     Model override e.g. "claude-sonnet-4-6", "gpt-4o", "gemini-1.5-pro"
+                       Defaults: Claude→haiku-4-5, OpenAI→gpt-4o-mini, Gemini→gemini-1.5-flash
             headless:  Run browser without visible window
             max_iterations: Safety cap on agentic loop
             cookie_dir: Where to save/load cookies (default: ~/.shopping_agent/cookies)
