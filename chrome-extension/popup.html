@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fee Checker</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 340px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      background: #0f0f11;
+      color: #e8e8ea;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid #1e1e24;
+    }
+
+    .logo { display: flex; align-items: center; gap: 8px; }
+    .logo-icon {
+      width: 28px; height: 28px;
+      background: linear-gradient(135deg, #7c6fe0, #5b8dee);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px;
+    }
+    .logo-text { font-weight: 700; font-size: 15px; color: #fff; }
+
+    #settings-btn {
+      background: none; border: none; cursor: pointer;
+      color: #666; font-size: 18px; padding: 2px 4px;
+      border-radius: 6px; transition: color .15s;
+    }
+    #settings-btn:hover { color: #aaa; }
+
+    #site-label {
+      padding: 10px 16px 8px;
+      font-size: 12px;
+      color: #666;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #analyze-btn {
+      display: block;
+      width: calc(100% - 32px);
+      margin: 4px 16px 14px;
+      padding: 10px;
+      background: linear-gradient(135deg, #7c6fe0, #5b8dee);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: opacity .15s;
+    }
+    #analyze-btn:hover { opacity: 0.88; }
+    #analyze-btn:disabled { opacity: 0.45; cursor: default; }
+
+    /* ── Loading ── */
+    #loading {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      padding: 28px 16px;
+      color: #888;
+      font-size: 13px;
+    }
+    .spinner {
+      width: 28px; height: 28px;
+      border: 3px solid #2a2a35;
+      border-top-color: #7c6fe0;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── No-key notice ── */
+    #no-key {
+      display: none;
+      padding: 20px 16px;
+      text-align: center;
+      color: #888;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    #no-key a { color: #7c6fe0; cursor: pointer; text-decoration: underline; }
+
+    /* ── Error ── */
+    #error-box {
+      display: none;
+      margin: 0 16px 14px;
+      padding: 10px 12px;
+      background: #2a1a1a;
+      border: 1px solid #5a2020;
+      border-radius: 8px;
+      color: #f08080;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    /* ── Results ── */
+    #results { display: none; padding: 0 16px 16px; }
+
+    .store-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: #aaa;
+      margin-bottom: 10px;
+    }
+
+    .fee-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .fee-table tr td {
+      padding: 6px 0;
+      border-bottom: 1px solid #1e1e24;
+    }
+    .fee-table tr:last-child td { border-bottom: none; }
+    .fee-table .label { color: #aaa; }
+    .fee-table .amount { text-align: right; color: #e8e8ea; font-variant-numeric: tabular-nums; }
+    .fee-table .null-amount { text-align: right; color: #3a3a45; }
+
+    .total-row td {
+      padding-top: 10px !important;
+      font-weight: 700;
+      font-size: 15px;
+      color: #fff !important;
+      border-bottom: none !important;
+    }
+
+    .notes {
+      margin-top: 12px;
+      padding: 8px 10px;
+      background: #1a1a22;
+      border-radius: 8px;
+      font-size: 11px;
+      color: #666;
+      line-height: 1.5;
+    }
+
+    .badge-free { color: #4caf82; }
+    .badge-warn { color: #e0a040; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">
+      <div class="logo-icon">💸</div>
+      <span class="logo-text">Fee Checker</span>
+    </div>
+    <button id="settings-btn" title="Settings">⚙️</button>
+  </header>
+
+  <div id="site-label">Loading page info…</div>
+
+  <div id="no-key">
+    Add your <strong>Gemini API key</strong> to get started.<br/>
+    <a id="open-settings">Open Settings →</a>
+  </div>
+
+  <button id="analyze-btn">Analyze Fees</button>
+
+  <div id="loading">
+    <div class="spinner"></div>
+    <span>Analyzing fees…</span>
+  </div>
+
+  <div id="error-box"></div>
+
+  <div id="results">
+    <div class="store-name" id="store-name"></div>
+    <table class="fee-table" id="fee-table"></table>
+    <div class="notes" id="notes" style="display:none"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
