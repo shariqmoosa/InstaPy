@@ -11,7 +11,9 @@ import base64
 import json
 import os
 import random
+import tempfile
 import time
+import zipfile
 from urllib.parse import urlparse
 
 from pyvirtualdisplay import Display
@@ -84,6 +86,66 @@ _CONSENT_XPATHS = [
 _DEFAULT_COOKIE_DIR = os.path.join(os.path.expanduser("~"), ".shopping_agent", "cookies")
 
 
+def _create_proxy_extension(proxy: dict) -> str:
+    """Create a temporary Chrome extension zip that routes traffic through a proxy.
+
+    Supports both HTTP and SOCKS5 proxies with username/password auth.
+
+    Args:
+        proxy: dict with keys: host, port, username, password, scheme ("http"|"socks5")
+
+    Returns:
+        Path to the temporary zip file (caller should delete when done).
+    """
+    scheme = proxy.get("scheme", "socks5")
+    host = proxy["host"]
+    port = int(proxy["port"])
+    username = proxy["username"]
+    password = proxy["password"]
+
+    manifest = json.dumps({
+        "version": "1.0.0",
+        "manifest_version": 2,
+        "name": "Proxy Auth",
+        "permissions": [
+            "proxy", "tabs", "unlimitedStorage", "storage",
+            "<all_urls>", "webRequest", "webRequestBlocking",
+        ],
+        "background": {"scripts": ["background.js"]},
+        "minimum_chrome_version": "22.0.0",
+    })
+
+    background_js = f"""
+var config = {{
+    mode: "fixed_servers",
+    rules: {{
+        singleProxy: {{ scheme: "{scheme}", host: "{host}", port: {port} }},
+        bypassList: ["localhost", "127.0.0.1"]
+    }}
+}};
+chrome.proxy.settings.set({{value: config, scope: "regular"}}, function() {{}});
+chrome.webRequest.onAuthRequired.addListener(
+    function(details) {{
+        return {{
+            authCredentials: {{
+                username: "{username}",
+                password: "{password}"
+            }}
+        }};
+    }},
+    {{urls: ["<all_urls>"]}},
+    ["blocking"]
+);
+"""
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False, prefix="sa_proxy_")
+    tmp.close()
+    with zipfile.ZipFile(tmp.name, "w") as zp:
+        zp.writestr("manifest.json", manifest)
+        zp.writestr("background.js", background_js)
+    return tmp.name
+
+
 def _human_delay(min_ms=80, max_ms=220):
     """Sleep for a random human-like interval."""
     time.sleep(random.uniform(min_ms / 1000, max_ms / 1000))
@@ -107,13 +169,27 @@ def _domain_from_url(url):
 
 
 class Browser:
-    def __init__(self, headless=True, timeout=20, cookie_dir=None):
+    def __init__(self, headless=True, timeout=20, cookie_dir=None, proxy=None):
+        """
+        Args:
+            headless:   Run without a visible window.
+            timeout:    Default WebDriver wait timeout in seconds.
+            cookie_dir: Directory for persisted cookie/localStorage files.
+            proxy:      Optional dict or ProxyConfig with keys:
+                        host, port, username, password, scheme ("socks5"|"http").
+                        When set, all browser traffic is routed through this proxy.
+        """
         self.timeout = timeout
         self._display = None
         self._driver = None
         self._headless = headless
         self.cookie_dir = cookie_dir or _DEFAULT_COOKIE_DIR
         os.makedirs(self.cookie_dir, exist_ok=True)
+        # Normalise proxy to a plain dict (accepts ProxyConfig dataclass too)
+        if proxy is not None and hasattr(proxy, "to_dict"):
+            proxy = proxy.to_dict()
+        self._proxy = proxy
+        self._proxy_ext_path = None  # temp file to clean up on quit
 
     def start(self):
         if self._headless:
@@ -159,6 +235,13 @@ class Browser:
         w = random.randint(1280, 1440)
         h = random.randint(720, 900)
         options.add_argument(f"--window-size={w},{h}")
+        if self._proxy:
+            self._proxy_ext_path = _create_proxy_extension(self._proxy)
+            options.add_extension(self._proxy_ext_path)
+            print(
+                f"[Browser] Proxy: {self._proxy['scheme']}://"
+                f"{self._proxy['host']}:{self._proxy['port']}"
+            )
         driver = uc.Chrome(options=options, headless=self._headless, version_main=None)
         return driver
 
@@ -179,6 +262,13 @@ class Browser:
             "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         )
+        if self._proxy:
+            self._proxy_ext_path = _create_proxy_extension(self._proxy)
+            options.add_extension(self._proxy_ext_path)
+            print(
+                f"[Browser] Proxy: {self._proxy['scheme']}://"
+                f"{self._proxy['host']}:{self._proxy['port']}"
+            )
         driver = webdriver.Chrome(options=options)
         return driver
 
@@ -493,3 +583,9 @@ class Browser:
                 self._display.stop()
         except Exception:
             pass
+        # Clean up the temporary proxy extension zip
+        if self._proxy_ext_path and os.path.exists(self._proxy_ext_path):
+            try:
+                os.unlink(self._proxy_ext_path)
+            except Exception:
+                pass

@@ -17,12 +17,14 @@ Replay a recorded playbook across multiple stores:
         --playbook ubereats.com
 """
 import argparse
+import getpass
 import json
 import sys
 
 from .agent import ShoppingAgent
 from .recorder import SiteRecorder
 from .playbook import PlaybookRunner
+from .vpn import AccountManager, SURFSHARK_LOCATIONS
 
 
 def _print_result(result, label=""):
@@ -53,13 +55,19 @@ def _print_comparison(results):
     print("="*60)
 
 
-def cmd_single(args):
-    agent = ShoppingAgent(
+def _make_agent(args):
+    """Construct ShoppingAgent from parsed args, including optional account."""
+    return ShoppingAgent(
         provider=args.provider,
         api_key=args.api_key,
         model=args.model,
         headless=not args.no_headless,
+        account=getattr(args, "account", None),
     )
+
+
+def cmd_single(args):
+    agent = _make_agent(args)
     result = agent.get_pricing(args.url, zip_code=args.zip, address=args.address)
     if args.json:
         print(result.to_json())
@@ -80,12 +88,7 @@ def cmd_compare(args):
             url = s
         stores[label] = url
 
-    agent = ShoppingAgent(
-        provider=args.provider,
-        api_key=args.api_key,
-        model=args.model,
-        headless=not args.no_headless,
-    )
+    agent = _make_agent(args)
     results = agent.compare(stores, zip_code=args.zip, address=args.address)
 
     if args.json:
@@ -99,6 +102,49 @@ def cmd_compare(args):
             _print_result(r["result"], label=r["store"])
         _print_comparison(results)
     return 0
+
+
+def cmd_account(args):
+    mgr = AccountManager()
+
+    if args.account_cmd == "add":
+        location = args.location
+        if location not in SURFSHARK_LOCATIONS and "." not in location:
+            print(f"Unknown location '{location}'. Available shortcodes:")
+            for k, v in sorted(SURFSHARK_LOCATIONS.items()):
+                print(f"  {k:<12} → {v}")
+            return 1
+        username = args.username or input("Surfshark service username: ")
+        password = args.password or getpass.getpass("Surfshark service password: ")
+        mgr.add(args.name, location, username, password)
+        print(f"Account '{args.name}' saved.")
+        return 0
+
+    elif args.account_cmd == "list":
+        accounts = mgr.list_all()
+        if not accounts:
+            print("No accounts configured. Use: account add <name> <location>")
+            return 0
+        print(f"\n{'NAME':<16} {'SCHEME':<8} {'HOST':<40} {'PORT'}")
+        print("-" * 72)
+        for name, info in accounts.items():
+            print(f"{name:<16} {info['scheme']:<8} {info['host']:<40} {info['port']}")
+        return 0
+
+    elif args.account_cmd == "remove":
+        mgr.remove(args.name)
+        return 0
+
+    elif args.account_cmd == "locations":
+        print(f"\n{'SHORTCODE':<14} SOCKS5 HOSTNAME")
+        print("-" * 60)
+        for k, v in sorted(SURFSHARK_LOCATIONS.items()):
+            print(f"{k:<14} {v}")
+        return 0
+
+    else:
+        print("Usage: account <add|list|remove|locations>")
+        return 1
 
 
 def cmd_record(args):
@@ -134,6 +180,11 @@ def main():
         p.add_argument("--address", default=None, help="Full delivery address")
         p.add_argument("--no-headless", action="store_true", help="Show browser window")
         p.add_argument("--json", action="store_true", help="Output raw JSON")
+        p.add_argument(
+            "--account", default=None, metavar="NAME",
+            help="Named account profile (routes traffic through that account's Surfshark IP). "
+                 "Configure with: account add <name> <location>",
+        )
 
     # Single store
     p_single = sub.add_parser("get", help="Get pricing for a single product URL")
@@ -148,6 +199,32 @@ def main():
         metavar="LABEL:URL",
         help="Store URLs, optionally prefixed with label: e.g. ubereats:https://...",
     )
+
+    # Account management (IP switcher)
+    p_account = sub.add_parser(
+        "account",
+        help="Manage Surfshark account → proxy mappings for per-account IP switching",
+    )
+    account_sub = p_account.add_subparsers(dest="account_cmd")
+
+    p_acc_add = account_sub.add_parser("add", help="Add or update a named account")
+    p_acc_add.add_argument("name", help="Account name, e.g. 'alice' or 'work'")
+    p_acc_add.add_argument(
+        "location",
+        help="Surfshark server shortcode (e.g. 'us-nyc') or full SOCKS5 hostname. "
+             "Run 'account locations' for the full list.",
+    )
+    p_acc_add.add_argument("--username", default=None,
+                           help="Surfshark service username (prompted if omitted)")
+    p_acc_add.add_argument("--password", default=None,
+                           help="Surfshark service password (prompted if omitted)")
+
+    account_sub.add_parser("list", help="List all configured accounts")
+
+    p_acc_rm = account_sub.add_parser("remove", help="Delete a named account")
+    p_acc_rm.add_argument("name", help="Account name to remove")
+
+    account_sub.add_parser("locations", help="List all available Surfshark server shortcodes")
 
     # Record
     p_record = sub.add_parser("record", help="Record a browser session as a playbook")
@@ -170,6 +247,8 @@ def main():
         return cmd_single(args)
     elif args.cmd == "compare":
         return cmd_compare(args)
+    elif args.cmd == "account":
+        return cmd_account(args)
     elif args.cmd == "record":
         return cmd_record(args)
     elif args.cmd == "replay":

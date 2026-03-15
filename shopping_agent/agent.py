@@ -13,6 +13,7 @@ import os
 from .browser import Browser
 from .models import get_model_client, estimate_cost
 from .pricing import PricingResult
+from .vpn import AccountManager
 from .tools import TOOL_SCHEMAS, handle_tool
 
 SYSTEM_PROMPT = """You are a shopping price researcher. Your job is to:
@@ -60,25 +61,49 @@ class ShoppingAgent:
         max_iterations=25,
         cookie_dir=None,
         verbose=True,
+        account=None,         # Named account for IP switching via Surfshark
     ):
         """
         Args:
-            provider:  "claude" | "openai" | "gemini" | "auto"
-            api_key:   API key for the chosen provider
-            model:     Model override e.g. "claude-sonnet-4-6", "gpt-4o", "gemini-1.5-pro"
-                       Defaults: Claude→haiku-4-5, OpenAI→gpt-4o-mini, Gemini→gemini-1.5-flash
-            headless:  Run browser without visible window
+            provider:   "claude" | "openai" | "gemini" | "auto"
+            api_key:    API key for the chosen provider
+            model:      Model override e.g. "claude-sonnet-4-6", "gpt-4o", "gemini-1.5-pro"
+                        Defaults: Claude→haiku-4-5, OpenAI→gpt-4o-mini, Gemini→gemini-1.5-flash
+            headless:   Run browser without visible window
             max_iterations: Safety cap on agentic loop
             cookie_dir: Where to save/load cookies (default: ~/.shopping_agent/cookies)
-            verbose:   Print progress logs
+            verbose:    Print progress logs
+            account:    Named account profile (see `account add` command). When set,
+                        the browser routes traffic through that account's Surfshark
+                        proxy and uses a namespaced cookie directory so each account
+                        maintains its own login session.
         """
         self._llm = get_model_client(provider=provider, api_key=api_key, model=model)
         self.headless = headless
         self.max_iterations = max_iterations
-        self.cookie_dir = cookie_dir
         self.verbose = verbose
         self._total_input_tokens = 0
         self._total_output_tokens = 0
+
+        # Resolve account → proxy + per-account cookie directory
+        self._proxy = None
+        if account:
+            mgr = AccountManager()
+            self._proxy = mgr.get(account)
+            if self._proxy is None:
+                raise ValueError(
+                    f"Account '{account}' not found. "
+                    "Run: python -m shopping_agent.main account add <name> <location>"
+                )
+            if verbose:
+                print(f"[ShoppingAgent] Account '{account}' → proxy {self._proxy.host}")
+            # Namespace cookies per account so sessions don't bleed across profiles
+            base = cookie_dir or os.path.join(
+                os.path.expanduser("~"), ".shopping_agent", "cookies"
+            )
+            self.cookie_dir = os.path.join(base, account)
+        else:
+            self.cookie_dir = cookie_dir
 
     # ------------------------------------------------------------------
     # Public API
@@ -99,7 +124,7 @@ class ShoppingAgent:
         self._total_input_tokens = 0
         self._total_output_tokens = 0
 
-        browser = Browser(headless=self.headless, cookie_dir=self.cookie_dir)
+        browser = Browser(headless=self.headless, cookie_dir=self.cookie_dir, proxy=self._proxy)
         browser.start()
 
         try:
