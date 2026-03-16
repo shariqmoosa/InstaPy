@@ -63,19 +63,58 @@ function detectCheckoutPlatform() {
   return null;
 }
 
+// Keywords that label a subtotal/item-total row
+const _SUBTOTAL_LABELS = /\b(?:subtotal|item\s+total|items?\s+subtotal|items?\s+total|est(?:imated)?\s+subtotal|merch(?:andise)?\s+total|order\s+items?)\b/i;
+// Dollar amount pattern
+const _PRICE_RE = /^\$?\s*([\d,]+\.\d{2})$/;
+
+function _parseDollar(text) {
+  const m = text.trim().match(_PRICE_RE);
+  if (!m) return null;
+  const v = parseFloat(m[1].replace(/,/g, ""));
+  return (v > 0 && v < 500) ? v : null;
+}
+
+// Walk up to `depth` ancestors and their siblings looking for a label keyword.
+function _nearbyHasLabel(el, depth) {
+  let cur = el;
+  for (let i = 0; i <= depth; i++) {
+    if (!cur) break;
+    // Check siblings at this level
+    let sib = cur.previousElementSibling;
+    while (sib) {
+      if (_SUBTOTAL_LABELS.test(sib.textContent)) return true;
+      sib = sib.previousElementSibling;
+    }
+    sib = cur.nextElementSibling;
+    while (sib) {
+      if (_SUBTOTAL_LABELS.test(sib.textContent)) return true;
+      sib = sib.nextElementSibling;
+    }
+    // Check parent's own text (excluding children)
+    if (cur.parentElement && _SUBTOTAL_LABELS.test(cur.parentElement.textContent)) return true;
+    cur = cur.parentElement;
+  }
+  return false;
+}
+
 function detectCheckoutSubtotal() {
+  // Strategy 1: DOM proximity — find a price element whose nearby DOM says "subtotal"
+  const allEls = Array.from(document.querySelectorAll("span, div, p, td, strong, b"));
+  for (const el of allEls) {
+    const children = el.children.length;
+    if (children > 3) continue; // skip containers with lots of children
+    const v = _parseDollar(el.textContent);
+    if (v === null) continue;
+    if (_nearbyHasLabel(el, 3)) return v;
+  }
+
+  // Strategy 2: flat-text regex fallback
   const text = extractText();
   const patterns = [
-    // "Subtotal $9.87" / "Item total $24.56" / "Merchandise total $49.99"
-    /(?:subtotal|item\s+total|items?\s+subtotal|merch(?:andise)?\s+total)[\s\S]{0,30}?\$\s*([\d,]+\.\d{2})/i,
-    // "$9.87\nSubtotal" reversed order
+    /(?:subtotal|item\s+total|items?\s+subtotal|items?\s+total|est\.?\s*subtotal|merch(?:andise)?\s+total)[\s\S]{0,30}?\$\s*([\d,]+\.\d{2})/i,
     /\$\s*([\d,]+\.\d{2})\s*\n?\s*(?:subtotal|item\s+total)/i,
-    // DoorDash: "Items $9.87" or "Items (3) $9.87"
     /\bitems?\s*(?:\(\d+\))?\s*\$\s*([\d,]+\.\d{2})/i,
-    // Instacart: "Est. subtotal\n$24.56" (multiline)
-    /est\.?\s*subtotal[\s\S]{0,20}?\$\s*([\d,]+\.\d{2})/i,
-    // Generic: standalone dollar amount followed/preceded by "total" within 40 chars
-    /\btotal\b[\s\S]{0,40}?\$\s*([\d,]+\.\d{2})/i,
   ];
   for (const p of patterns) {
     const m = text.match(p);
@@ -327,20 +366,8 @@ async function buildCartToTarget({ target, currentSubtotal, platform }) {
 }
 
 function _readCartSubtotal() {
-  const text = extractText();
-  // Matches "Subtotal $9.87" or "Item total\n$24.56" etc.
-  const patterns = [
-    /(?:items?\s*total|item\s+subtotal|subtotal|your\s+subtotal)[\s\n$]*\$?\s*([\d,]+\.\d{2})/i,
-    /\$\s*([\d,]+\.\d{2})\s*\n?(?:subtotal|item\s+total)/i,
-  ];
-  for (const p of patterns) {
-    const m = text.match(p);
-    if (m) {
-      const v = parseFloat(m[1].replace(/,/g, ""));
-      if (v > 0 && v < 500) return v;
-    }
-  }
-  return null;
+  // Reuse the same DOM-proximity logic as detectCheckoutSubtotal
+  return detectCheckoutSubtotal();
 }
 
 function _findPlusButton() {
