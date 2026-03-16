@@ -57,6 +57,22 @@ function detectCheckoutPlatform() {
   return null;
 }
 
+function detectCheckoutSubtotal() {
+  const text = extractText();
+  const patterns = [
+    /(?:subtotal|item\s+total|items?\s+subtotal|merch(?:andise)?\s+total)[\s\S]{0,30}?\$\s*([\d,]+\.\d{2})/i,
+    /\$\s*([\d,]+\.\d{2})\s*\n?(?:subtotal|item\s+total)/i,
+  ];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m) {
+      const v = parseFloat(m[1].replace(/,/g, ""));
+      if (v > 0 && v < 500) return v;
+    }
+  }
+  return null;
+}
+
 function detectRetailerFromTitle() {
   const m = document.title.match(/^(.+?)\s*[-–—|]\s*(DoorDash|Instacart|Uber Eats)/i);
   return m ? m[1].trim() : null;
@@ -79,7 +95,8 @@ function notifyCheckout() {
       platform,
       retailer: detectRetailerFromTitle() || "",
       url: location.href,
-      pageText: extractText(),  // include full page text for auto-capture
+      pageText: extractText(),
+      subtotal: detectCheckoutSubtotal(), // regex fallback so AI doesn't need to find it
     }).catch(() => {});
   }, 3000);
 }

@@ -131,11 +131,11 @@ async function autoCapture(msg, tabId) {
       membership   = result.membership_status === "Member" ? "Member" : "Non-Member";
     }
 
-    const itemTotal = parseFloat(String(result.item_total ?? "").replace(/[$,]/g, ""));
+    const itemTotal = parseFloat(String(result.item_total ?? "").replace(/[$,]/g, "")) || msg.subtotal || 0;
     const basket    = nearestBasket(itemTotal);
     if (!basket) {
       setBadge(tabId, "GO", "#4caf82");
-      showTabToast(tabId, "⚠️ Could not read cart total — add items and try again", "err");
+      showTabToast(tabId, "⚠️ Could not read cart total — scroll down so all fees are visible, then refresh checkout", "err");
       return;
     }
 
