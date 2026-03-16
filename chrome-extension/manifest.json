@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Fee Checker",
-  "version": "1.2",
-  "description": "Instantly reveal hidden delivery, service fees and taxes on any shopping page. Train it once per store — it navigates automatically next time.",
+  "version": "1.3",
+  "description": "Weekly delivery fee collection assistant for DoorDash, Instacart, and Uber Eats. Import your weekly CSV, capture checkouts in one click, export the completed 44-column data sheet.",
   "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": [
     "https://generativelanguage.googleapis.com/*",

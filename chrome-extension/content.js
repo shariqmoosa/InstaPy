@@ -1,6 +1,6 @@
 "use strict";
 
-// ── Page data extraction (used by popup Analyze) ──────────────────────────────
+// ── Page data extraction ───────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "GET_PAGE_DATA") {
@@ -12,7 +12,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "UPDATE_COUNT")     { updateOverlayCount(msg.count); }
   if (msg.type === "RECORDING_SAVED")  { showSavedState(msg.store, msg.stepCount); }
   if (msg.type === "REPLAY_DONE")      { showToast("✅ Replay done — analyzing fees…"); }
-  // None of the above need async sendResponse, so no return true
 });
 
 // ── Text extraction ───────────────────────────────────────────────────────────
@@ -35,6 +34,44 @@ function extractText() {
   return parts.join("\n").slice(0, 12000);
 }
 
+// ── Checkout detection ────────────────────────────────────────────────────────
+// Fires CHECKOUT_DETECTED when the user lands on a checkout page for any of
+// the three target platforms. Background sets the badge to "GO".
+
+const CHECKOUT_PATTERNS = [
+  { platform: "DoorDash",  hostRe: /doordash\.com$/,  pathRe: /\/checkout|\/confirm-order/ },
+  { platform: "Instacart", hostRe: /instacart\.com$/, pathRe: /\/checkout|\/place_order/   },
+  { platform: "Uber Eats", hostRe: /ubereats\.com$/,  pathRe: /\/checkout/                 },
+];
+
+function detectCheckoutPlatform() {
+  const host = location.hostname.replace(/^www\./, "");
+  const path = location.pathname;
+  for (const p of CHECKOUT_PATTERNS) {
+    if (p.hostRe.test(host) && p.pathRe.test(path)) return p.platform;
+  }
+  return null;
+}
+
+function detectRetailerFromTitle() {
+  // Page titles: "7-Eleven - DoorDash"  or  "Walgreens | Instacart"
+  const m = document.title.match(/^(.+?)\s*[-–—|]\s*(DoorDash|Instacart|Uber Eats)/i);
+  return m ? m[1].trim() : null;
+}
+
+function notifyCheckout() {
+  const platform = detectCheckoutPlatform();
+  if (!platform) return;
+  chrome.runtime.sendMessage({
+    type: "CHECKOUT_DETECTED",
+    platform,
+    retailer: detectRetailerFromTitle() || "",
+    url: location.href,
+  }).catch(() => {});
+}
+
+notifyCheckout(); // run on initial load
+
 // ── Recording ─────────────────────────────────────────────────────────────────
 
 let _recording = false;
@@ -49,7 +86,6 @@ function getBestSelector(el) {
   if (testid) return `[data-testid="${testid}"]`;
   const aria = el.getAttribute("aria-label");
   if (aria) return `[aria-label="${aria}"]`;
-  // Build a short CSS path (up to 3 levels)
   const parts = [];
   let cur = el;
   for (let i = 0; i < 3 && cur && cur !== document.body; i++) {
@@ -66,7 +102,7 @@ function getBestSelector(el) {
 
 document.addEventListener("click", (e) => {
   if (!_recording) return;
-  if (e.target.closest("#_fc_overlay")) return; // ignore clicks on our overlay
+  if (e.target.closest("#_fc_overlay")) return;
   const step = {
     type: "click",
     url: location.href,
@@ -80,14 +116,17 @@ document.addEventListener("click", (e) => {
 
 // Detect URL changes (SPA navigation)
 const _navObserver = new MutationObserver(() => {
-  if (location.href !== _lastUrl) {
-    _lastUrl = location.href;
-    if (_recording) {
-      chrome.runtime.sendMessage({ type: "RECORD_STEP", step: { type: "navigate", url: location.href } });
-      _stepCount++;
-      updateOverlayCount(_stepCount);
-    }
+  if (location.href === _lastUrl) return;
+  _lastUrl = location.href;
+
+  if (_recording) {
+    chrome.runtime.sendMessage({ type: "RECORD_STEP", step: { type: "navigate", url: location.href } });
+    _stepCount++;
+    updateOverlayCount(_stepCount);
   }
+
+  // Re-check checkout on every SPA navigation
+  notifyCheckout();
 });
 _navObserver.observe(document.documentElement, { subtree: true, childList: true });
 
@@ -96,7 +135,6 @@ function startRecording() {
   _stepCount = 0;
   _lastUrl = location.href;
   injectOverlay();
-  // Record starting URL
   chrome.runtime.sendMessage({ type: "RECORD_STEP", step: { type: "navigate", url: location.href } });
 }
 
@@ -129,12 +167,11 @@ function injectOverlay() {
   document.body.appendChild(_overlay);
   document.getElementById("_fc_stop").addEventListener("click", () => {
     chrome.runtime.sendMessage({ type: "STOP_RECORDING" });
-    _recording = false; // stop capturing clicks immediately
+    _recording = false;
   });
 }
 
 function showSavedState(store, stepCount) {
-  // Replace overlay content with "next step" instructions
   if (!_overlay) return;
   _overlay.innerHTML = `
     <span style="margin-right:10px">
@@ -163,21 +200,30 @@ function updateOverlayCount(n) {
 }
 
 // ── Init: restore overlay after full-page navigation ─────────────────────────
-// When the user navigates to a new page the content script is killed and
-// reloaded. Check session state and re-inject the overlay if still recording.
+// Fix: retry with backoff if the service worker is still starting up instead
+// of bailing on the first chrome.runtime.lastError (was the checkout bug).
 
-chrome.runtime.sendMessage({ type: "RECORDING_STATE" }, (state) => {
-  if (chrome.runtime.lastError) return; // extension context invalidated
-  if (state?.recording) {
-    _recording = true;
-    _lastUrl = location.href;
-    _stepCount = state.steps?.length || 0;
-    injectOverlay();
-    updateOverlayCount(_stepCount);
-    // Record this page as a navigate step
-    chrome.runtime.sendMessage({ type: "RECORD_STEP", step: { type: "navigate", url: location.href } });
-  }
-});
+function _restoreRecordingState(attempt) {
+  attempt = attempt || 0;
+  chrome.runtime.sendMessage({ type: "RECORDING_STATE" }, (state) => {
+    if (chrome.runtime.lastError) {
+      if (attempt < 3) setTimeout(() => _restoreRecordingState(attempt + 1), 300 * (attempt + 1));
+      return;
+    }
+    if (state?.recording) {
+      _recording = true;
+      _lastUrl = location.href;
+      _stepCount = state.steps?.length || 0;
+      injectOverlay();
+      updateOverlayCount(_stepCount);
+      chrome.runtime.sendMessage({ type: "RECORD_STEP", step: { type: "navigate", url: location.href } });
+    }
+  });
+}
+
+_restoreRecordingState();
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
 
 function showToast(msg) {
   const t = document.createElement("div");
