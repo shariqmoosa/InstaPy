@@ -137,20 +137,37 @@ function notifyCheckout() {
   const platform = detectCheckoutPlatform();
   if (!platform) return;
 
-  // Debounce: if URL changed quickly (SPA nav) reset the timer
   if (_checkoutTimer) clearTimeout(_checkoutTimer);
 
-  // Wait 3s for the checkout page to fully render all fees before grabbing text
   _checkoutTimer = setTimeout(() => {
     _checkoutTimer = null;
-    chrome.runtime.sendMessage({
-      type: "CHECKOUT_DETECTED",
-      platform,
-      retailer: detectRetailerFromTitle() || "",
-      url: location.href,
-      pageText: extractText(),
-      subtotal: detectCheckoutSubtotal(), // regex fallback so AI doesn't need to find it
-    }).catch(() => {});
+    const hostname = location.hostname.replace(/^www\./, "");
+
+    // Try the user-taught selector first (most reliable)
+    chrome.storage.local.get({ subtotalSelectors: {} }, ({ subtotalSelectors }) => {
+      let subtotal = null;
+      const saved = subtotalSelectors[hostname];
+      if (saved?.selector) {
+        try {
+          const el = document.querySelector(saved.selector);
+          if (el) {
+            const v = parseFloat((el.innerText || el.textContent || "").replace(/[$,]/g, ""));
+            if (v > 0 && v < 500) subtotal = v;
+          }
+        } catch (_) {}
+      }
+      // Fall back to DOM-proximity detection
+      if (!subtotal) subtotal = detectCheckoutSubtotal();
+
+      chrome.runtime.sendMessage({
+        type: "CHECKOUT_DETECTED",
+        platform,
+        retailer: detectRetailerFromTitle() || "",
+        url: location.href,
+        pageText: extractText(),
+        subtotal,
+      }).catch(() => {});
+    });
   }, 3000);
 }
 
@@ -185,8 +202,47 @@ function getBestSelector(el) {
 }
 
 document.addEventListener("click", (e) => {
-  if (!_recording) return;
   if (e.target.closest("#_fc_overlay")) return;
+
+  // Subtotal pick mode: user is teaching the extension where the subtotal lives
+  if (_pickingSubtotal) {
+    e.preventDefault();
+    e.stopPropagation();
+    _pickingSubtotal = false;
+    document.body.style.cursor = "";
+
+    const sel      = getBestSelector(e.target);
+    const rawText  = (e.target.innerText || e.target.textContent || "").trim();
+    const v        = parseFloat(rawText.replace(/[$,]/g, ""));
+    const hostname = location.hostname.replace(/^www\./, "");
+
+    if (sel && v > 0 && v < 500) {
+      // Save selector keyed by platform hostname so every future checkout uses it
+      chrome.storage.local.get({ subtotalSelectors: {} }, ({ subtotalSelectors }) => {
+        subtotalSelectors[hostname] = { selector: sel, savedAt: new Date().toISOString() };
+        chrome.storage.local.set({ subtotalSelectors }, () => {
+          const markBtn = document.getElementById("_fc_mark");
+          if (markBtn) {
+            markBtn.textContent = `✅ Subtotal locked: ${rawText}`;
+            markBtn.style.background = "#1e3a2e";
+            markBtn.style.color = "#4caf82";
+          }
+        });
+      });
+    } else {
+      const markBtn = document.getElementById("_fc_mark");
+      if (markBtn) {
+        markBtn.textContent = "⚠️ Not a price — try again";
+        markBtn.style.background = "#7c6fe0";
+        setTimeout(() => {
+          if (markBtn) { markBtn.textContent = "📌 Mark subtotal"; markBtn.style.background = "#7c6fe0"; }
+        }, 2000);
+      }
+    }
+    return;
+  }
+
+  if (!_recording) return;
   const step = {
     type: "click",
     url: location.href,
@@ -229,12 +285,25 @@ function stopRecording() {
 
 // ── Overlay banner ────────────────────────────────────────────────────────────
 
+let _pickingSubtotal = false;
+
 function injectOverlay() {
   if (_overlay) return;
   _overlay = document.createElement("div");
   _overlay.id = "_fc_overlay";
+
+  const onCheckout = !!detectCheckoutPlatform();
+  const markBtn = onCheckout
+    ? `<button id="_fc_mark" style="
+        background:#7c6fe0;color:#fff;border:none;padding:5px 12px;
+        border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;margin-right:6px;">
+        📌 Mark subtotal
+      </button>`
+    : "";
+
   _overlay.innerHTML = `
     <span style="margin-right:10px">🔴 Recording <b id="_fc_count">0</b> steps</span>
+    ${markBtn}
     <button id="_fc_stop" style="
       background:#e53935;color:#fff;border:none;padding:5px 14px;
       border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">
@@ -252,7 +321,20 @@ function injectOverlay() {
   document.getElementById("_fc_stop").addEventListener("click", () => {
     chrome.runtime.sendMessage({ type: "STOP_RECORDING" });
     _recording = false;
+    _pickingSubtotal = false;
+    document.body.style.cursor = "";
   });
+
+  const markBtn = document.getElementById("_fc_mark");
+  if (markBtn) {
+    markBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      _pickingSubtotal = true;
+      document.body.style.cursor = "crosshair";
+      markBtn.textContent = "👆 Now click the subtotal amount…";
+      markBtn.style.background = "#e07a53";
+    });
+  }
 }
 
 function showSavedState(store, stepCount) {
