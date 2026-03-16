@@ -7,26 +7,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ url: location.href, title: document.title, pageText: extractText() });
     return true;
   }
-  if (msg.type === "RECORDING_START") {
-    startRecording();
-    return true;
-  }
-  if (msg.type === "RECORDING_STOP") {
-    stopRecording();
-    return true;
-  }
-  if (msg.type === "UPDATE_COUNT") {
-    updateOverlayCount(msg.count);
-    return true;
-  }
-  if (msg.type === "RECORDING_SAVED") {
-    showSavedState(msg.store, msg.stepCount);
-    return true;
-  }
-  if (msg.type === "REPLAY_DONE") {
-    showToast("✅ Replay done — analyzing fees…");
-    return true;
-  }
+  if (msg.type === "RECORDING_START")  { startRecording(); }
+  if (msg.type === "RECORDING_STOP")   { stopRecording(); }
+  if (msg.type === "UPDATE_COUNT")     { updateOverlayCount(msg.count); }
+  if (msg.type === "RECORDING_SAVED")  { showSavedState(msg.store, msg.stepCount); }
+  if (msg.type === "REPLAY_DONE")      { showToast("✅ Replay done — analyzing fees…"); }
+  // None of the above need async sendResponse, so no return true
 });
 
 // ── Text extraction ───────────────────────────────────────────────────────────

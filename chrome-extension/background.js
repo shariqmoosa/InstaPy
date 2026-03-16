@@ -24,10 +24,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!rec?.recording) return;
       rec.steps.push(msg.step);
       chrome.storage.session.set({ rec });
-      // Update overlay counter in the tab
       chrome.tabs.sendMessage(rec.tabId, { type: "UPDATE_COUNT", count: rec.steps.length }).catch(() => {});
     });
-    return true;
+    // fire-and-forget — no sendResponse needed
   }
 
   if (msg.type === "STOP_RECORDING") {
@@ -59,7 +58,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       chrome.storage.session.remove("rec");
     });
-    return true;
+    // fire-and-forget — no sendResponse needed
   }
 
   if (msg.type === "REPLAY_STEPS") {
