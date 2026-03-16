@@ -131,8 +131,14 @@ async function autoCapture(msg, tabId) {
       membership   = result.membership_status === "Member" ? "Member" : "Non-Member";
     }
 
-    const itemTotal = parseFloat(String(result.item_total ?? "").replace(/[$,]/g, "")) || msg.subtotal || 0;
-    const basket    = nearestBasket(itemTotal);
+    let itemTotal = parseFloat(String(result.item_total ?? "").replace(/[$,]/g, "")) || msg.subtotal || 0;
+
+    // If AI and regex both missed it, do a direct scan of the raw page text
+    if (!itemTotal && msg.pageText) {
+      itemTotal = extractSubtotalFromText(msg.pageText) || 0;
+    }
+
+    const basket = nearestBasket(itemTotal);
     if (!basket) {
       setBadge(tabId, "GO", "#4caf82");
       showTabToast(tabId, "⚠️ Could not read cart total — scroll down so all fees are visible, then refresh checkout", "err");
@@ -223,6 +229,24 @@ const BASKETS = [10, 25, 50, 75, 100];
 function nearestBasket(itemTotal) {
   if (!itemTotal || isNaN(itemTotal) || itemTotal <= 0) return null;
   return BASKETS.reduce((a, b) => Math.abs(b - itemTotal) < Math.abs(a - itemTotal) ? b : a);
+}
+
+function extractSubtotalFromText(text) {
+  const patterns = [
+    /(?:subtotal|item\s+total|items?\s+subtotal|merch(?:andise)?\s+total)[\s\S]{0,30}?\$\s*([\d,]+\.\d{2})/i,
+    /\$\s*([\d,]+\.\d{2})\s*\n?\s*(?:subtotal|item\s+total)/i,
+    /\bitems?\s*(?:\(\d+\))?\s*\$\s*([\d,]+\.\d{2})/i,
+    /est\.?\s*subtotal[\s\S]{0,20}?\$\s*([\d,]+\.\d{2})/i,
+    /\btotal\b[\s\S]{0,40}?\$\s*([\d,]+\.\d{2})/i,
+  ];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m) {
+      const v = parseFloat(m[1].replace(/,/g, ""));
+      if (v > 0 && v < 500) return v;
+    }
+  }
+  return null;
 }
 
 function jobKey(platform, retailerName, basket, membership) {

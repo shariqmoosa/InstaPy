@@ -66,8 +66,16 @@ function detectCheckoutPlatform() {
 function detectCheckoutSubtotal() {
   const text = extractText();
   const patterns = [
+    // "Subtotal $9.87" / "Item total $24.56" / "Merchandise total $49.99"
     /(?:subtotal|item\s+total|items?\s+subtotal|merch(?:andise)?\s+total)[\s\S]{0,30}?\$\s*([\d,]+\.\d{2})/i,
-    /\$\s*([\d,]+\.\d{2})\s*\n?(?:subtotal|item\s+total)/i,
+    // "$9.87\nSubtotal" reversed order
+    /\$\s*([\d,]+\.\d{2})\s*\n?\s*(?:subtotal|item\s+total)/i,
+    // DoorDash: "Items $9.87" or "Items (3) $9.87"
+    /\bitems?\s*(?:\(\d+\))?\s*\$\s*([\d,]+\.\d{2})/i,
+    // Instacart: "Est. subtotal\n$24.56" (multiline)
+    /est\.?\s*subtotal[\s\S]{0,20}?\$\s*([\d,]+\.\d{2})/i,
+    // Generic: standalone dollar amount followed/preceded by "total" within 40 chars
+    /\btotal\b[\s\S]{0,40}?\$\s*([\d,]+\.\d{2})/i,
   ];
   for (const p of patterns) {
     const m = text.match(p);
