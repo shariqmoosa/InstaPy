@@ -1,5 +1,10 @@
 "use strict";
 
+// Guard against double-injection (happens when popup force-injects into an already-instrumented tab)
+if (window.__fcInjected) { /* already running — skip */ }
+else {
+window.__fcInjected = true;
+
 // Safe wrapper: swallows "Receiving end does not exist" when the MV3
 // service worker is idle.  Any real errors are still logged.
 function safeSend(msg, cb) {
@@ -589,3 +594,5 @@ function showToast(msg, style) {
   document.body.appendChild(t);
   setTimeout(() => t.remove(), 4000);
 }
+
+} // end window.__fcInjected guard

@@ -83,11 +83,21 @@ $("start-btn").addEventListener("click", async () => {
   $("start-btn").textContent = "Going to checkout…";
   $("start-btn").disabled = true;
   try {
-    const resp = await chrome.tabs.sendMessage(_activeTab.id, { type: "CLICK_CHECKOUT" });
+    let resp = await chrome.tabs.sendMessage(_activeTab.id, { type: "CLICK_CHECKOUT" }).catch(() => null);
+
+    // Content script not injected (tab was open before extension loaded) — inject & retry once
+    if (resp === null) {
+      $("start-btn").textContent = "Connecting…";
+      await chrome.scripting.executeScript({ target: { tabId: _activeTab.id }, files: ["content.js"] });
+      await new Promise(r => setTimeout(r, 400));
+      resp = await chrome.tabs.sendMessage(_activeTab.id, { type: "CLICK_CHECKOUT" }).catch(() => null);
+    }
+
     if (resp?.ok) { window.close(); }
+    else if (resp === null) { $("start-hint").textContent = "Could not connect — please refresh the DoorDash tab."; }
     else { $("start-hint").textContent = "Checkout button not found — navigate to your cart first."; }
-  } catch {
-    $("start-hint").textContent = "Could not connect to page — try refreshing.";
+  } catch (e) {
+    $("start-hint").textContent = "Could not connect — please refresh the DoorDash tab.";
   } finally {
     $("start-btn").textContent = "▶ Start with $10";
     $("start-btn").disabled = false;
