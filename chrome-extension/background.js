@@ -84,12 +84,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
-  if (msg.type === "CLEAR_CHECKOUT") {
-    chrome.storage.session.remove("checkoutCtx");
-    if (sender.tab?.id != null) setBadge(sender.tab.id, "", "#4caf82");
-    return false;
-  }
-
   // ── Captures storage ───────────────────────────────────────────────────────
 
   if (msg.type === "GET_CAPTURES") {
