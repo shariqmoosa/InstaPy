@@ -131,7 +131,7 @@ async function autoCapture(msg, tabId) {
       membership   = result.membership_status === "Member" ? "Member" : "Non-Member";
     }
 
-    const itemTotal = parseFloat(result.item_total);
+    const itemTotal = parseFloat(String(result.item_total ?? "").replace(/[$,]/g, ""));
     const basket    = nearestBasket(itemTotal);
     if (!basket) {
       setBadge(tabId, "GO", "#4caf82");
