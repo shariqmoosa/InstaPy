@@ -15,7 +15,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "START_RECORDING") {
     const rec = { recording: true, steps: [], store: msg.store, tabId: msg.tabId };
     chrome.storage.session.set({ rec }, () => {
-      chrome.tabs.sendMessage(msg.tabId, { type: "RECORDING_START" });
+      chrome.tabs.sendMessage(msg.tabId, { type: "RECORDING_START" }).catch(() => {});
       sendResponse({ ok: true });
     });
     return true;

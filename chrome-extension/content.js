@@ -1,5 +1,14 @@
 "use strict";
 
+// Safe wrapper: swallows "Receiving end does not exist" when the MV3
+// service worker is idle.  Any real errors are still logged.
+function safeSend(msg, cb) {
+  try {
+    const p = chrome.runtime.sendMessage(msg, cb);
+    if (p && typeof p.catch === "function") p.catch(() => {});
+  } catch (_) {}
+}
+
 // ── Page data extraction ───────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -249,7 +258,7 @@ document.addEventListener("click", (e) => {
     selector: getBestSelector(e.target),
     text: (e.target.innerText || e.target.textContent || "").trim().slice(0, 80),
   };
-  chrome.runtime.sendMessage({ type: "RECORD_STEP", step });
+  safeSend({ type: "RECORD_STEP", step });
   _stepCount++;
   updateOverlayCount(_stepCount);
 }, true);
@@ -260,7 +269,7 @@ const _navObserver = new MutationObserver(() => {
   _lastUrl = location.href;
 
   if (_recording) {
-    chrome.runtime.sendMessage({ type: "RECORD_STEP", step: { type: "navigate", url: location.href } });
+    safeSend({ type: "RECORD_STEP", step: { type: "navigate", url: location.href } });
     _stepCount++;
     updateOverlayCount(_stepCount);
   }
@@ -275,7 +284,7 @@ function startRecording() {
   _stepCount = 0;
   _lastUrl = location.href;
   injectOverlay();
-  chrome.runtime.sendMessage({ type: "RECORD_STEP", step: { type: "navigate", url: location.href } });
+  safeSend({ type: "RECORD_STEP", step: { type: "navigate", url: location.href } });
 }
 
 function stopRecording() {
@@ -319,7 +328,7 @@ function injectOverlay() {
   });
   document.body.appendChild(_overlay);
   document.getElementById("_fc_stop").addEventListener("click", () => {
-    chrome.runtime.sendMessage({ type: "STOP_RECORDING" });
+    safeSend({ type: "STOP_RECORDING" });
     _recording = false;
     _pickingSubtotal = false;
     document.body.style.cursor = "";
@@ -351,7 +360,7 @@ function showSavedState(store, stepCount) {
       Dismiss
     </button>`;
   document.getElementById("_fc_dismiss").addEventListener("click", () => {
-    chrome.runtime.sendMessage({ type: "DISMISS_OVERLAY" });
+    safeSend({ type: "DISMISS_OVERLAY" });
     removeOverlay();
   });
 }
@@ -380,7 +389,7 @@ function _restoreRecordingState(attempt) {
       _stepCount = state.steps?.length || 0;
       injectOverlay();
       updateOverlayCount(_stepCount);
-      chrome.runtime.sendMessage({ type: "RECORD_STEP", step: { type: "navigate", url: location.href } });
+      safeSend({ type: "RECORD_STEP", step: { type: "navigate", url: location.href } });
     }
   });
 }
