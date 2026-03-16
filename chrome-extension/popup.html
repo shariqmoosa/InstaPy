@@ -48,94 +48,40 @@
     /* ══════════════ WEEKLY TAB ══════════════ */
     #tab-weekly { display: none; }
 
-    #weekly-empty { padding: 20px 16px; }
-    #weekly-empty p { color: #555; font-size: 13px; line-height: 1.6; margin-bottom: 12px; text-align: center; }
-
-    #import-drop {
-      border: 2px dashed #2a2a40; border-radius: 12px; padding: 16px 12px;
-      text-align: center; cursor: pointer; color: #555; font-size: 13px;
-      line-height: 1.7; transition: border-color .15s; margin-bottom: 10px;
+    #weekly-empty { padding: 28px 20px; text-align: center; }
+    #weekly-empty p { color: #666; font-size: 13px; line-height: 1.8; }
+    #weekly-empty strong { color: #aaa; }
+    #weekly-empty .step {
+      display: flex; align-items: flex-start; gap: 10px;
+      text-align: left; margin: 10px 0; padding: 10px 12px;
+      background: #17171f; border: 1px solid #1e1e28; border-radius: 8px;
     }
-    #import-drop:hover, #import-drop.drag-over { border-color: #7c6fe0; color: #aaa; }
-    #import-drop strong { display: block; color: #888; margin-bottom: 2px; }
+    #weekly-empty .step-num { color: #7c6fe0; font-weight: 700; flex-shrink: 0; }
+    #weekly-empty .step-text { color: #888; font-size: 12px; line-height: 1.5; }
 
-    #import-paste {
-      width: 100%; padding: 8px 10px; background: #0f0f11;
-      border: 1px solid #2a2a35; border-radius: 8px;
-      color: #e8e8ea; font-size: 11px; font-family: monospace;
-      resize: vertical; min-height: 72px; outline: none;
-    }
-    #import-paste:focus { border-color: #7c6fe0; }
-
-    #import-btn {
-      display: block; width: 100%; margin-top: 10px; padding: 9px;
-      border: none; border-radius: 10px;
-      background: linear-gradient(135deg, #7c6fe0, #5b8dee);
-      color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
-    }
-    #import-btn:hover { opacity: 0.88; }
-    #import-error { margin-top: 8px; color: #f08080; font-size: 12px; min-height: 16px; }
-
-    /* Job loaded */
+    /* Sessions */
     #weekly-job { display: none; }
-
     #weekly-header {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 10px 16px 4px; font-size: 12px;
+      padding: 10px 16px 6px; font-size: 12px;
     }
-    #weekly-date { color: #555; }
+    #weekly-header span:first-child { color: #555; }
     #weekly-progress-text { color: #4caf82; font-weight: 600; }
 
-    #progress-track {
-      height: 4px; background: #1e1e28; margin: 4px 16px 0;
-      border-radius: 2px; overflow: hidden;
+    #sessions-list { padding: 4px 16px 0; max-height: 230px; overflow-y: auto; }
+    #sessions-list::-webkit-scrollbar { width: 3px; }
+    #sessions-list::-webkit-scrollbar-thumb { background: #2a2a35; border-radius: 2px; }
+
+    .session-row {
+      padding: 8px 10px; margin-bottom: 6px;
+      background: #17171f; border: 1px solid #1e1e28; border-radius: 8px;
     }
-    #progress-fill { height: 100%; background: #4caf82; border-radius: 2px; width: 0%; transition: width .4s; }
-
-    #checkout-banner {
-      display: none; margin: 10px 16px 0; padding: 8px 12px;
-      background: #1a2e22; border: 1px solid #4caf82;
-      border-radius: 8px; font-size: 12px; color: #4caf82;
-    }
-    #checkout-banner b { color: #fff; }
-
-    #ctx-picker { padding: 10px 16px 0; }
-    .ctx-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-    .ctx-label { font-size: 11px; color: #555; width: 62px; flex-shrink: 0; }
-    .chip-row { display: flex; gap: 5px; flex-wrap: wrap; }
-
-    #capture-btn {
-      display: block; width: calc(100% - 32px); margin: 10px 16px 0;
-      padding: 10px; border: none; border-radius: 10px;
-      background: linear-gradient(135deg, #4caf82, #2e9e6a);
-      color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; transition: opacity .15s;
-    }
-    #capture-btn:disabled { opacity: 0.3; cursor: default; }
-    #capture-btn:not(:disabled):hover { opacity: 0.88; }
-
-    #capture-status { min-height: 18px; padding: 5px 16px 0; font-size: 12px; text-align: center; }
-    #capture-status.ok  { color: #4caf82; }
-    #capture-status.err { color: #f08080; }
-
-    #queue-wrap { padding: 10px 16px 0; }
-    .queue-title { font-size: 10px; color: #444; margin-bottom: 6px; letter-spacing: .06em; text-transform: uppercase; }
-    #queue-list { max-height: 170px; overflow-y: auto; }
-    #queue-list::-webkit-scrollbar { width: 3px; }
-    #queue-list::-webkit-scrollbar-thumb { background: #2a2a35; border-radius: 2px; }
-
-    .qi { display: flex; align-items: center; gap: 6px; padding: 5px 0; border-bottom: 1px solid #151518; font-size: 12px; }
-    .qi:last-child { border-bottom: none; }
-    .qi-icon { font-size: 11px; width: 16px; text-align: center; flex-shrink: 0; }
-    .qi-main { flex: 1; color: #777; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .qi-city { font-size: 10px; color: #3a3a45; flex-shrink: 0; }
-    .qi.done .qi-main { color: #2e2e3a; }
-    .qi.next { background: #13132a; margin: 0 -4px; padding: 5px 4px; border-radius: 6px; }
-    .qi.next .qi-main { color: #fff; font-weight: 600; }
-    .qi.next .qi-city { color: #555; }
+    .session-header { font-size: 12px; color: #aaa; font-weight: 600; margin-bottom: 5px; }
+    .session-baskets { display: flex; gap: 6px; font-size: 12px; font-family: monospace; }
 
     #weekly-actions {
       display: flex; gap: 8px; padding: 12px 16px;
-      border-top: 1px solid #1e1e24; margin-top: 10px;
+      border-top: 1px solid #1e1e24; margin-top: 8px;
     }
     .act-btn {
       flex: 1; padding: 7px; border: 1px solid #2a2a35; border-radius: 8px;
@@ -235,79 +181,31 @@
   <!-- ══ WEEKLY TAB ══ -->
   <div id="tab-weekly">
 
-    <!-- No job loaded -->
+    <!-- No captures yet -->
     <div id="weekly-empty">
-      <p>Import your weekly input CSV to start.<br/>Paste from Excel or drop a file.</p>
-
-      <div id="import-drop">
-        <strong>📂 Drop CSV / TSV file here</strong>
-        or paste below
-        <input type="file" id="import-file" accept=".csv,.tsv,.txt" style="display:none">
+      <div class="step">
+        <span class="step-num">1</span>
+        <span class="step-text">Go to <strong>DoorDash</strong>, <strong>Instacart</strong>, or <strong>Uber Eats</strong> and open any store.</span>
       </div>
-
-      <textarea id="import-paste"
-        placeholder="Paste your two-section input here (retailers section then addresses section, separated by a blank line)…"></textarea>
-      <button id="import-btn">Load Job</button>
-      <div id="import-error"></div>
+      <div class="step">
+        <span class="step-num">2</span>
+        <span class="step-text">Build a <strong>~$10 cart</strong> and go to checkout.</span>
+      </div>
+      <div class="step">
+        <span class="step-num">3</span>
+        <span class="step-text">The extension captures all 5 basket sizes <strong>automatically</strong>. Then repeat for Member / Non-Member.</span>
+      </div>
     </div>
 
-    <!-- Job loaded -->
+    <!-- Has captures -->
     <div id="weekly-job">
       <div id="weekly-header">
-        <span id="weekly-date"></span>
+        <span>Sessions</span>
         <span id="weekly-progress-text"></span>
       </div>
-      <div id="progress-track"><div id="progress-fill"></div></div>
-
-      <div id="checkout-banner">
-        ✅ Checkout: <b id="checkout-platform"></b>
-        <span id="checkout-retailer" style="color:#aaa; font-weight:400"></span>
-      </div>
-
-      <div id="ctx-picker">
-        <div class="ctx-row">
-          <span class="ctx-label">Basket</span>
-          <div class="chip-row" id="basket-chips">
-            <button class="chip" data-size="10">$10</button>
-            <button class="chip" data-size="25">$25</button>
-            <button class="chip" data-size="50">$50</button>
-            <button class="chip" data-size="75">$75</button>
-            <button class="chip" data-size="100">$100</button>
-          </div>
-        </div>
-        <div class="ctx-row">
-          <span class="ctx-label">Membership</span>
-          <div class="chip-row" id="mem-chips">
-            <button class="chip active" data-mem="Member">Member</button>
-            <button class="chip" data-mem="Non-Member">Non-Member</button>
-          </div>
-        </div>
-      </div>
-
-      <button id="capture-btn" disabled>📸 Capture Checkout</button>
-      <div id="capture-status"></div>
-
-      <!-- Next store shortcut -->
-      <div id="next-store-wrap" style="display:none; padding: 6px 16px 0;">
-        <div style="display:flex; align-items:center; gap:8px; padding:8px 10px;
-          background:#17171f; border:1px solid #1e1e28; border-radius:8px;">
-          <span style="font-size:11px; color:#555; flex-shrink:0;">Next:</span>
-          <span id="next-store-label" style="flex:1; font-size:12px; color:#aaa; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></span>
-          <a id="open-next-btn" href="#" target="_blank"
-            style="font-size:11px; font-weight:600; color:#5b8dee; text-decoration:none; flex-shrink:0;">
-            Open →
-          </a>
-        </div>
-      </div>
-
-      <div id="queue-wrap">
-        <div class="queue-title">Queue</div>
-        <div id="queue-list"></div>
-      </div>
-
+      <div id="sessions-list"></div>
       <div id="weekly-actions">
         <button class="act-btn" id="export-btn">📤 Export CSV</button>
-        <button class="act-btn" id="reimport-btn">📥 New CSV</button>
         <button class="act-btn danger" id="clear-job-btn">🗑 Clear</button>
       </div>
     </div>

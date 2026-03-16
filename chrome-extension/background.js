@@ -90,38 +90,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
-  // ── Weekly job ─────────────────────────────────────────────────────────────
+  // ── Captures storage ───────────────────────────────────────────────────────
 
-  if (msg.type === "IMPORT_JOB") {
-    const job = { ...msg.job, captures: {}, importedAt: Date.now() };
-    chrome.storage.local.set({ weeklyJob: job }, () => sendResponse({ ok: true }));
-    return true;
-  }
-
-  if (msg.type === "GET_JOB") {
-    chrome.storage.local.get({ weeklyJob: null }, ({ weeklyJob }) => {
+  if (msg.type === "GET_CAPTURES") {
+    chrome.storage.local.get({ weeklyCaptures: {} }, ({ weeklyCaptures }) => {
       chrome.storage.session.get({ checkoutCtx: null }, ({ checkoutCtx }) => {
-        sendResponse({ job: weeklyJob, checkoutCtx });
+        sendResponse({ captures: weeklyCaptures, checkoutCtx });
       });
     });
     return true;
   }
 
-  if (msg.type === "SAVE_WEEKLY_CAPTURE") {
-    chrome.storage.local.get({ weeklyJob: null }, ({ weeklyJob }) => {
-      if (!weeklyJob) { sendResponse({ ok: false, error: "No active job" }); return; }
-      weeklyJob.captures[msg.key] = msg.data;
-      chrome.storage.local.set({ weeklyJob }, () => {
-        if (msg.tabId != null) setBadge(msg.tabId, "", "#4caf82");
-        chrome.storage.session.remove("checkoutCtx");
-        sendResponse({ ok: true, count: Object.keys(weeklyJob.captures).length });
-      });
-    });
-    return true;
-  }
-
-  if (msg.type === "CLEAR_JOB") {
-    chrome.storage.local.remove("weeklyJob", () => sendResponse({ ok: true }));
+  if (msg.type === "CLEAR_CAPTURES") {
+    chrome.storage.local.remove("weeklyCaptures", () => sendResponse({ ok: true }));
     return true;
   }
 });
@@ -129,7 +110,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // ── Auto-capture logic ────────────────────────────────────────────────────────
 
 async function autoCapture(msg, tabId) {
-  // Guard: don't double-capture same tab
   const lockKey = `capturing_${tabId}`;
   if (await getSession(lockKey)) return;
   await setSession({ [lockKey]: true });
@@ -137,124 +117,90 @@ async function autoCapture(msg, tabId) {
   setBadge(tabId, "…", "#7c6fe0");
 
   try {
-    const { weeklyJob } = await getLocal("weeklyJob");
-    if (!weeklyJob) { setBadge(tabId, "GO", "#4caf82"); return; }
-
     const settings = await getSettings();
 
-    // ── Fast path: combo already pinned for this tab ──────────────────────────
-    // After the first capture the combo (platform+retailer+city+membership) is
-    // pinned in session.  Subsequent checkouts on the same tab skip store/
-    // membership detection — we only need to extract the fee numbers.
+    // Fast path: combo pinned after first capture — only extract fees.
     const pinned = await getSession(`pinned_${tabId}`);
 
-    let result, matched, membership;
+    let result, retailerName, membership;
 
     if (pinned) {
-      matched    = pinned.matched;
-      membership = pinned.membership;
-      const prompt = buildFastPrompt(msg.pageText, msg.url, msg.platform, matched.retailerName, membership);
+      retailerName = pinned.retailerName;
+      membership   = pinned.membership;
+      const prompt = buildFastPrompt(msg.pageText, msg.url, msg.platform, retailerName, membership);
       result = await callOllama(settings.ollamaModel || "llama3.2", prompt, settings.ollamaApiKey || null);
     } else {
-      // ── Full path: detect store + membership from page ──────────────────────
+      // First capture: detect store + membership from page
       const prompt = buildAutoPrompt(msg.pageText, msg.url, msg.platform);
       result = await callOllama(settings.ollamaModel || "llama3.2", prompt, settings.ollamaApiKey || null);
-
-      const storeName = result.store || msg.retailer || "";
-      matched = matchRetailer(storeName, weeklyJob.retailers);
-      if (!matched) {
-        setBadge(tabId, "?", "#e0a020");
-        showTabToast(tabId, `⚠️ "${storeName}" not in job — open popup to capture manually`, "err");
-        return;
-      }
-      membership = result.membership_status === "Member" ? "Member" : "Non-Member";
+      retailerName = result.store || msg.retailer || "Unknown Store";
+      membership   = result.membership_status === "Member" ? "Member" : "Non-Member";
     }
 
-    // Basket size from item_total
     const itemTotal = parseFloat(result.item_total);
     const basket    = nearestBasket(itemTotal);
     if (!basket) {
       setBadge(tabId, "GO", "#4caf82");
-      showTabToast(tabId, "⚠️ Could not read basket amount — build your cart and try again", "err");
+      showTabToast(tabId, "⚠️ Could not read cart total — add items and try again", "err");
       return;
     }
 
-    const key = jobKey(msg.platform, matched.retailerName, matched.city, basket, membership);
+    const key = jobKey(msg.platform, retailerName, basket, membership);
 
-    // Skip if already captured (show banner so user knows where they are)
-    if (weeklyJob.captures[key]) {
+    const { weeklyCaptures } = await getLocal("weeklyCaptures");
+    const allCaptures = weeklyCaptures || {};
+
+    if (allCaptures[key]) {
       setBadge(tabId, "✓", "#4caf82");
       setTimeout(() => setBadge(tabId, "", "#4caf82"), 3000);
       showTabToast(tabId, `Already captured — $${basket} / ${membership}`, "ok");
-      sendComboBanner(tabId, weeklyJob, msg.platform, matched.retailerName, matched.city, membership);
-      if (!pinned) await setSession({ [`pinned_${tabId}`]: { matched, membership } });
+      sendComboBanner(tabId, allCaptures, msg.platform, retailerName, membership);
+      if (!pinned) await setSession({ [`pinned_${tabId}`]: { retailerName, membership } });
       return;
     }
 
-    // Save
-    weeklyJob.captures[key] = {
+    allCaptures[key] = {
       ...result,
-      platform:        msg.platform,
-      retailerName:    matched.retailerName,
-      city:            matched.city,
-      state:           matched.state,
-      density:         matched.density,
-      retailerType:    matched.retailerType,
-      deliveryAddress: matched.deliveryAddress,
-      basketTarget:    basket,
+      platform:     msg.platform,
+      retailerName,
       membership,
-      capturedAt: new Date().toISOString(),
+      basketTarget: basket,
+      capturedAt:   new Date().toISOString(),
     };
-    await setLocal({ weeklyJob });
+    await setLocal({ weeklyCaptures: allCaptures });
     await setSession({ checkoutCtx: null });
 
-    const done  = Object.keys(weeklyJob.captures).length;
-    const total = weeklyJob.retailers.length * 3 * 5 * 2;
-
+    const doneForCombo = BASKETS.filter(b => allCaptures[jobKey(msg.platform, retailerName, b, membership)]).length;
     setBadge(tabId, "✓", "#4caf82");
     setTimeout(() => setBadge(tabId, "", "#4caf82"), 3000);
-    showTabToast(tabId, `✅ Saved $${basket} / ${membership}  (${done}/${total})`, "ok");
+    showTabToast(tabId, `✅ Saved $${basket} / ${membership}  (${doneForCombo}/5)`, "ok");
 
-    // Pin combo so subsequent checkouts on this tab use the fast path
-    await setSession({ [`pinned_${tabId}`]: { matched, membership } });
+    await setSession({ [`pinned_${tabId}`]: { retailerName, membership } });
+    sendComboBanner(tabId, allCaptures, msg.platform, retailerName, membership);
 
-    // Remaining baskets for this membership AFTER the current save
-    const remaining = BASKETS.filter(b =>
-      !weeklyJob.captures[jobKey(msg.platform, matched.retailerName, matched.city, b, membership)]
-    );
-
-    // Send/update the combo progress banner
-    sendComboBanner(tabId, weeklyJob, msg.platform, matched.retailerName, matched.city, membership);
+    const remaining = BASKETS.filter(b => !allCaptures[jobKey(msg.platform, retailerName, b, membership)]);
 
     if (remaining.length > 0) {
-      // Auto-build the next basket: content script navigates back, adds items, goes to checkout.
-      // Small delay so the "Saved" toast is visible before "Building…" toast appears.
       setTimeout(() => {
         chrome.tabs.sendMessage(tabId, {
-          type:           "BUILD_CART_TO_TARGET",
-          target:         remaining[0],
+          type:            "BUILD_CART_TO_TARGET",
+          target:          remaining[0],
           currentSubtotal: itemTotal,
-          platform:       msg.platform,
+          platform:        msg.platform,
         }).catch(() => {});
       }, 1500);
     } else {
-      // All 5 baskets captured for this membership — prompt to switch
       const other = membership === "Member" ? "Non-Member" : "Member";
-      const allOtherDone = BASKETS.every(b =>
-        !!weeklyJob.captures[jobKey(msg.platform, matched.retailerName, matched.city, b, other)]
-      );
+      const allOtherDone = BASKETS.every(b => !!allCaptures[jobKey(msg.platform, retailerName, b, other)]);
       if (!allOtherDone) {
-        await setSession({ [`pinned_${tabId}`]: { matched, membership: other } });
+        await setSession({ [`pinned_${tabId}`]: { retailerName, membership: other } });
         showTabToast(tabId,
           `🎉 All ${membership} done! ${other === "Member" ? "Activate" : "Deactivate"} membership → build a $10 cart → go to checkout.`,
           "ok"
         );
       } else {
         await setSession({ [`pinned_${tabId}`]: null });
-        showTabToast(tabId,
-          `🏁 ${matched.retailerName} complete on ${msg.platform}! Open popup → next store.`,
-          "ok"
-        );
+        showTabToast(tabId, `🏁 ${retailerName} complete on ${msg.platform}! Open popup → Export CSV.`, "ok");
       }
     }
 
@@ -266,17 +212,12 @@ async function autoCapture(msg, tabId) {
   }
 }
 
-// Send a combo-progress banner to the content script
-function sendComboBanner(tabId, weeklyJob, platform, retailerName, city, membership) {
-  const capturedBaskets  = [];
-  const remainingBaskets = [];
-  for (const b of BASKETS) {
-    const k = jobKey(platform, retailerName, city, b, membership);
-    (weeklyJob.captures[k] ? capturedBaskets : remainingBaskets).push(b);
-  }
+function sendComboBanner(tabId, allCaptures, platform, retailerName, membership) {
+  const capturedBaskets  = BASKETS.filter(b =>  allCaptures[jobKey(platform, retailerName, b, membership)]);
+  const remainingBaskets = BASKETS.filter(b => !allCaptures[jobKey(platform, retailerName, b, membership)]);
   chrome.tabs.sendMessage(tabId, {
     type: "SHOW_COMBO_BANNER",
-    platform, retailerName, city, membership,
+    platform, retailerName, membership,
     capturedBaskets, remainingBaskets,
   }).catch(() => {});
 }
@@ -290,18 +231,8 @@ function nearestBasket(itemTotal) {
   return BASKETS.reduce((a, b) => Math.abs(b - itemTotal) < Math.abs(a - itemTotal) ? b : a);
 }
 
-function jobKey(platform, retailerName, city, basket, membership) {
-  return `${platform}|${retailerName}|${city}|${basket}|${membership}`.toLowerCase();
-}
-
-function matchRetailer(detected, retailers) {
-  if (!detected || !retailers?.length) return null;
-  const d = detected.toLowerCase().trim();
-  return retailers.find(r => r.retailerName.toLowerCase() === d) ||
-         retailers.find(r => {
-           const n = r.retailerName.toLowerCase();
-           return d.includes(n) || n.includes(d);
-         }) || null;
+function jobKey(platform, retailerName, basket, membership) {
+  return `${platform}|${retailerName}|${basket}|${membership}`.toLowerCase();
 }
 
 function setBadge(tabId, text, color) {
