@@ -287,6 +287,19 @@
       <button id="capture-btn" disabled>📸 Capture Checkout</button>
       <div id="capture-status"></div>
 
+      <!-- Next store shortcut -->
+      <div id="next-store-wrap" style="display:none; padding: 6px 16px 0;">
+        <div style="display:flex; align-items:center; gap:8px; padding:8px 10px;
+          background:#17171f; border:1px solid #1e1e28; border-radius:8px;">
+          <span style="font-size:11px; color:#555; flex-shrink:0;">Next:</span>
+          <span id="next-store-label" style="flex:1; font-size:12px; color:#aaa; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></span>
+          <a id="open-next-btn" href="#" target="_blank"
+            style="font-size:11px; font-weight:600; color:#5b8dee; text-decoration:none; flex-shrink:0;">
+            Open →
+          </a>
+        </div>
+      </div>
+
       <div id="queue-wrap">
         <div class="queue-title">Queue</div>
         <div id="queue-list"></div>

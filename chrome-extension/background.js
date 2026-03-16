@@ -63,40 +63,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  // ── Weekly job ─────────────────────────────────────────────────────────────
+  // ── Auto-capture on checkout ───────────────────────────────────────────────
+  // When content.js detects a checkout page it sends us the page text.
+  // If a weekly job is loaded we call Ollama, auto-detect basket + membership
+  // and save — no popup interaction required.
 
   if (msg.type === "CHECKOUT_DETECTED") {
-    // Store checkout context so popup can read it
-    const ctx = {
-      platform: msg.platform,
-      retailer: msg.retailer || "",
-      url: msg.url,
-      tabId: sender.tab?.id,
-      ts: Date.now(),
-    };
+    const tabId = sender.tab?.id;
+    // Always store context so popup can use it for manual capture fallback
+    const ctx = { platform: msg.platform, retailer: msg.retailer, url: msg.url, tabId, ts: Date.now() };
     chrome.storage.session.set({ checkoutCtx: ctx });
-    // Green badge so team knows capture is ready
-    if (sender.tab?.id != null) {
-      chrome.action.setBadgeText({ text: "GO", tabId: sender.tab.id });
-      chrome.action.setBadgeBackgroundColor({ color: "#4caf82", tabId: sender.tab.id });
-    }
-    return false; // fire-and-forget
-  }
 
-  if (msg.type === "CLEAR_CHECKOUT") {
-    chrome.storage.session.remove("checkoutCtx");
-    if (sender.tab?.id != null) {
-      chrome.action.setBadgeText({ text: "", tabId: sender.tab.id });
+    // Attempt fully automatic capture
+    if (msg.pageText && tabId != null) {
+      autoCapture(msg, tabId);
+    } else {
+      // No page text yet — just light up the badge for manual capture
+      setBadge(tabId, "GO", "#4caf82");
     }
     return false;
   }
 
+  if (msg.type === "CLEAR_CHECKOUT") {
+    chrome.storage.session.remove("checkoutCtx");
+    if (sender.tab?.id != null) setBadge(sender.tab.id, "", "#4caf82");
+    return false;
+  }
+
+  // ── Weekly job ─────────────────────────────────────────────────────────────
+
   if (msg.type === "IMPORT_JOB") {
-    const job = {
-      ...msg.job,
-      captures: {},
-      importedAt: Date.now(),
-    };
+    const job = { ...msg.job, captures: {}, importedAt: Date.now() };
     chrome.storage.local.set({ weeklyJob: job }, () => sendResponse({ ok: true }));
     return true;
   }
@@ -115,10 +112,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!weeklyJob) { sendResponse({ ok: false, error: "No active job" }); return; }
       weeklyJob.captures[msg.key] = msg.data;
       chrome.storage.local.set({ weeklyJob }, () => {
-        // Clear badge on the tab that was captured
-        if (msg.tabId != null) {
-          chrome.action.setBadgeText({ text: "", tabId: msg.tabId });
-        }
+        if (msg.tabId != null) setBadge(msg.tabId, "", "#4caf82");
         chrome.storage.session.remove("checkoutCtx");
         sendResponse({ ok: true, count: Object.keys(weeklyJob.captures).length });
       });
@@ -131,6 +125,193 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 });
+
+// ── Auto-capture logic ────────────────────────────────────────────────────────
+
+async function autoCapture(msg, tabId) {
+  // Guard: don't double-capture same tab
+  const lockKey = `capturing_${tabId}`;
+  const lockState = await getSession(lockKey);
+  if (lockState) return;
+  await setSession({ [lockKey]: true });
+
+  setBadge(tabId, "…", "#7c6fe0");
+
+  try {
+    const { weeklyJob } = await getLocal("weeklyJob");
+    if (!weeklyJob) {
+      // No job loaded — just set GO badge for manual popup capture
+      setBadge(tabId, "GO", "#4caf82");
+      return;
+    }
+
+    const settings = await getSettings();
+    const prompt   = buildAutoPrompt(msg.pageText, msg.url, msg.platform);
+    const result   = await callOllama(
+      settings.ollamaModel || "llama3.2",
+      prompt,
+      settings.ollamaApiKey || null
+    );
+
+    // Match retailer
+    const storeName = result.store || msg.retailer || "";
+    const matched   = matchRetailer(storeName, weeklyJob.retailers);
+    if (!matched) {
+      setBadge(tabId, "?", "#e0a020");
+      showTabToast(tabId, `⚠️ Store "${storeName}" not in job — open popup to capture manually`, "err");
+      return;
+    }
+
+    // Auto-detect basket size from item_total (nearest target)
+    const itemTotal = parseFloat(result.item_total);
+    const basket    = nearestBasket(itemTotal);
+    if (!basket) {
+      setBadge(tabId, "GO", "#4caf82");
+      showTabToast(tabId, "⚠️ Could not detect basket size — select it in popup", "err");
+      return;
+    }
+
+    // Membership from AI result (it detects DashPass/Instacart+/Uber One)
+    const membership = result.membership_status === "Member" ? "Member" : "Non-Member";
+
+    const key = jobKey(msg.platform, matched.retailerName, matched.city, basket, membership);
+
+    // Skip if already captured
+    if (weeklyJob.captures[key]) {
+      setBadge(tabId, "✓", "#4caf82");
+      setTimeout(() => setBadge(tabId, "", "#4caf82"), 3000);
+      showTabToast(tabId, `✅ Already captured — ${msg.platform} / ${matched.retailerName} / $${basket} / ${membership}`, "ok");
+      return;
+    }
+
+    // Save
+    weeklyJob.captures[key] = {
+      ...result,
+      platform:        msg.platform,
+      retailerName:    matched.retailerName,
+      city:            matched.city,
+      state:           matched.state,
+      density:         matched.density,
+      retailerType:    matched.retailerType,
+      deliveryAddress: matched.deliveryAddress,
+      basketTarget:    basket,
+      membership,
+      capturedAt: new Date().toISOString(),
+    };
+    await setLocal({ weeklyJob });
+
+    // Clear context and badge
+    await setSession({ checkoutCtx: null, [lockKey]: null });
+    setBadge(tabId, "✓", "#4caf82");
+    setTimeout(() => setBadge(tabId, "", "#4caf82"), 3000);
+
+    const done  = Object.keys(weeklyJob.captures).length;
+    const total = weeklyJob.retailers.length * 3 * 5 * 2;
+    showTabToast(
+      tabId,
+      `✅ Auto-saved: ${msg.platform} / ${matched.retailerName} / $${basket} / ${membership}  (${done}/${total})`,
+      "ok"
+    );
+
+  } catch (err) {
+    setBadge(tabId, "GO", "#4caf82");
+    // Don't show error toast — just leave GO badge so user can capture manually
+    console.error("[Fee Checker] Auto-capture failed:", err.message);
+  } finally {
+    await setSession({ [lockKey]: null });
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const BASKETS = [10, 25, 50, 75, 100];
+
+function nearestBasket(itemTotal) {
+  if (!itemTotal || isNaN(itemTotal) || itemTotal <= 0) return null;
+  return BASKETS.reduce((a, b) => Math.abs(b - itemTotal) < Math.abs(a - itemTotal) ? b : a);
+}
+
+function jobKey(platform, retailerName, city, basket, membership) {
+  return `${platform}|${retailerName}|${city}|${basket}|${membership}`.toLowerCase();
+}
+
+function matchRetailer(detected, retailers) {
+  if (!detected || !retailers?.length) return null;
+  const d = detected.toLowerCase().trim();
+  return retailers.find(r => r.retailerName.toLowerCase() === d) ||
+         retailers.find(r => {
+           const n = r.retailerName.toLowerCase();
+           return d.includes(n) || n.includes(d);
+         }) || null;
+}
+
+function setBadge(tabId, text, color) {
+  try {
+    chrome.action.setBadgeText({ text, tabId });
+    chrome.action.setBadgeBackgroundColor({ color, tabId });
+  } catch (e) {}
+}
+
+function showTabToast(tabId, text, style) {
+  chrome.tabs.sendMessage(tabId, { type: "SHOW_TOAST", text, style }).catch(() => {});
+}
+
+// Storage promise wrappers
+function getLocal(key)     { return new Promise(r => chrome.storage.local.get({ [key]: null }, d => r(d))); }
+function setLocal(obj)     { return new Promise(r => chrome.storage.local.set(obj, r)); }
+function getSession(key)   { return new Promise(r => chrome.storage.session.get({ [key]: null }, d => r(d[key]))); }
+function setSession(obj)   { return new Promise(r => chrome.storage.session.set(obj, r)); }
+function getSettings()     { return new Promise(r => chrome.storage.sync.get(["provider","ollamaModel","ollamaApiKey","geminiApiKey"], r)); }
+
+// ── Ollama call (from service worker) ────────────────────────────────────────
+
+async function callOllama(model, prompt, apiKey) {
+  const base    = apiKey ? "https://ollama.com" : "http://localhost:11434";
+  const headers = { "Content-Type": "application/json" };
+  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+
+  const resp = await fetch(`${base}/api/chat`, {
+    method: "POST", headers,
+    body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], stream: false }),
+  });
+  if (!resp.ok) throw new Error(`Ollama ${resp.status}`);
+  const data = await resp.json();
+  const raw  = data?.message?.content || data.response || "";
+  return JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim());
+}
+
+// ── Auto-capture prompt ───────────────────────────────────────────────────────
+
+function buildAutoPrompt(pageText, url, platform) {
+  return `You are extracting delivery fee data from a ${platform} checkout page.
+
+Page URL: ${url}
+Page content:
+---
+${pageText.slice(0, 10000)}
+---
+
+Return ONLY valid JSON — no markdown, no explanation:
+{
+  "store": "<retailer name exactly as shown on page>",
+  "membership_status": "<'Member' if DashPass/Instacart+/Uber One is shown as ACTIVE with delivery benefits (e.g. $0 delivery fee labeled as membership benefit, DashPass checkmark), otherwise 'Non-Member'>",
+  "item_total": "<merchandise subtotal before fees, numbers only no $ sign>",
+  "delivery_fee": "<delivery fee, '0' if free>",
+  "service_fee": "<platform/service fee>",
+  "regulatory_fee": "<regulatory fee or null>",
+  "long_distance_fee": "<long distance fee or null>",
+  "small_order_fee": "<small order fee or null>",
+  "taxes": "<total taxes>",
+  "order_total": "<grand total>",
+  "delivery_time_min": "<minimum delivery time in minutes as integer>",
+  "delivery_time_max": "<maximum delivery time in minutes as integer>",
+  "priority_delivery_time": "<priority option minutes or null>",
+  "priority_delivery_fee": "<priority delivery extra cost or null>",
+  "minimum_order": "<minimum order requirement or null>",
+  "notes": "<brief notable observation or null>"
+}
+Use null for anything not visible. Numbers as strings without $ signs.`;
+}
 
 // ── Replay ─────────────────────────────────────────────────────────────────────
 

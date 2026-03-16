@@ -12,6 +12,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "UPDATE_COUNT")     { updateOverlayCount(msg.count); }
   if (msg.type === "RECORDING_SAVED")  { showSavedState(msg.store, msg.stepCount); }
   if (msg.type === "REPLAY_DONE")      { showToast("✅ Replay done — analyzing fees…"); }
+  if (msg.type === "SHOW_TOAST")       { showToast(msg.text, msg.style); }
 });
 
 // ── Text extraction ───────────────────────────────────────────────────────────
@@ -35,8 +36,9 @@ function extractText() {
 }
 
 // ── Checkout detection ────────────────────────────────────────────────────────
-// Fires CHECKOUT_DETECTED when the user lands on a checkout page for any of
-// the three target platforms. Background sets the badge to "GO".
+// When the user lands on a checkout page for any of the three target platforms,
+// we wait 3s for fees to render then send the full page text to background.
+// Background auto-captures without any popup interaction needed.
 
 const CHECKOUT_PATTERNS = [
   { platform: "DoorDash",  hostRe: /doordash\.com$/,  pathRe: /\/checkout|\/confirm-order/ },
@@ -54,20 +56,30 @@ function detectCheckoutPlatform() {
 }
 
 function detectRetailerFromTitle() {
-  // Page titles: "7-Eleven - DoorDash"  or  "Walgreens | Instacart"
   const m = document.title.match(/^(.+?)\s*[-–—|]\s*(DoorDash|Instacart|Uber Eats)/i);
   return m ? m[1].trim() : null;
 }
 
+let _checkoutTimer = null;
+
 function notifyCheckout() {
   const platform = detectCheckoutPlatform();
   if (!platform) return;
-  chrome.runtime.sendMessage({
-    type: "CHECKOUT_DETECTED",
-    platform,
-    retailer: detectRetailerFromTitle() || "",
-    url: location.href,
-  }).catch(() => {});
+
+  // Debounce: if URL changed quickly (SPA nav) reset the timer
+  if (_checkoutTimer) clearTimeout(_checkoutTimer);
+
+  // Wait 3s for the checkout page to fully render all fees before grabbing text
+  _checkoutTimer = setTimeout(() => {
+    _checkoutTimer = null;
+    chrome.runtime.sendMessage({
+      type: "CHECKOUT_DETECTED",
+      platform,
+      retailer: detectRetailerFromTitle() || "",
+      url: location.href,
+      pageText: extractText(),  // include full page text for auto-capture
+    }).catch(() => {});
+  }, 3000);
 }
 
 notifyCheckout(); // run on initial load
@@ -200,8 +212,6 @@ function updateOverlayCount(n) {
 }
 
 // ── Init: restore overlay after full-page navigation ─────────────────────────
-// Fix: retry with backoff if the service worker is still starting up instead
-// of bailing on the first chrome.runtime.lastError (was the checkout bug).
 
 function _restoreRecordingState(attempt) {
   attempt = attempt || 0;
@@ -225,15 +235,21 @@ _restoreRecordingState();
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 
-function showToast(msg) {
+function showToast(msg, style) {
+  // style: "ok" (green), "err" (red), default (dark)
+  const colors = { ok: "#1a2e22", err: "#2a1a1a" };
+  const borders = { ok: "#4caf82", err: "#e05353" };
   const t = document.createElement("div");
   t.textContent = msg;
   Object.assign(t.style, {
     position: "fixed", bottom: "24px", left: "50%", transform: "translateX(-50%)",
-    background: "#1a1a2e", color: "#fff", padding: "10px 20px",
+    background: colors[style] || "#1a1a2e",
+    border: `1px solid ${borders[style] || "#2a2a40"}`,
+    color: "#fff", padding: "10px 20px",
     borderRadius: "10px", zIndex: "2147483647", fontFamily: "sans-serif",
     fontSize: "14px", boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+    whiteSpace: "nowrap",
   });
   document.body.appendChild(t);
-  setTimeout(() => t.remove(), 3000);
+  setTimeout(() => t.remove(), 4000);
 }

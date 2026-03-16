@@ -195,11 +195,19 @@ function renderWeeklyJob() {
     _ctx = null;
   }
 
-  // Capture button enabled when: on checkout AND basket selected
-  $("capture-btn").disabled = !(_ctx && _basket !== null);
+  // Capture button: manual fallback when auto-capture fails (badge stays "GO")
+  $("capture-btn").disabled    = !(_ctx && _basket !== null);
+  $("capture-btn").textContent = _ctx ? "📸 Capture Manually (fallback)" : "📸 Capture Checkout";
 
   renderQueue();
 }
+
+// Platform homepage URLs for the "Open Next" shortcut
+const PLATFORM_URLS = {
+  "DoorDash":  "https://www.doordash.com/",
+  "Instacart": "https://www.instacart.com/",
+  "Uber Eats": "https://www.ubereats.com/",
+};
 
 function renderQueue() {
   const captures = _job.captures || {};
@@ -220,10 +228,25 @@ function renderQueue() {
   const pending = items.filter(i => !i.done);
   const next    = pending[0] || null;
 
-  // Auto-suggest context for next item
+  // Auto-suggest context chips for manual fallback
   if (next && _basket === null) {
     setBasket(next.basket);
     setMembership(next.mem);
+  }
+
+  // "Open Next Store" shortcut
+  const nextWrap = $("next-store-wrap");
+  if (next) {
+    nextWrap.style.display = "block";
+    const plat = PLAT_SHORT[next.platform] || next.platform;
+    $("next-store-label").textContent =
+      `${plat} · ${next.r.retailerName} · $${next.basket} · ${next.mem} · ${next.r.city}`;
+    $("open-next-btn").onclick = (e) => {
+      e.preventDefault();
+      chrome.tabs.create({ url: PLATFORM_URLS[next.platform] || "https://www.doordash.com/" });
+    };
+  } else {
+    nextWrap.style.display = "none";
   }
 
   // Show last 2 done + next 8 pending
