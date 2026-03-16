@@ -162,6 +162,23 @@ function updateOverlayCount(n) {
   if (el) el.textContent = n;
 }
 
+// ── Init: restore overlay after full-page navigation ─────────────────────────
+// When the user navigates to a new page the content script is killed and
+// reloaded. Check session state and re-inject the overlay if still recording.
+
+chrome.runtime.sendMessage({ type: "RECORDING_STATE" }, (state) => {
+  if (chrome.runtime.lastError) return; // extension context invalidated
+  if (state?.recording) {
+    _recording = true;
+    _lastUrl = location.href;
+    _stepCount = state.steps?.length || 0;
+    injectOverlay();
+    updateOverlayCount(_stepCount);
+    // Record this page as a navigate step
+    chrome.runtime.sendMessage({ type: "RECORD_STEP", step: { type: "navigate", url: location.href } });
+  }
+});
+
 function showToast(msg) {
   const t = document.createElement("div");
   t.textContent = msg;
