@@ -416,7 +416,7 @@ async function renderRecordings() {
         <div class="rec-meta">${rec.steps.length} steps · ${date}</div>
       </div>
       <div class="rec-actions">
-        <button class="rec-btn rec-btn-play" data-store="${store}">▶ Run</button>
+        <button class="rec-btn rec-btn-play" data-store="${store}">▶ Run all baskets</button>
         <button class="rec-btn rec-btn-delete" data-store="${store}">✕</button>
       </div>
     </div>`;
@@ -435,21 +435,27 @@ async function renderRecordings() {
 }
 
 async function replayRecording(store, recordings) {
-  const [tab]  = await chrome.tabs.query({ active: true, currentWindow: true });
-  const steps  = recordings[store].steps;
-  $("record-btn").disabled     = true;
-  $("record-btn").textContent  = "▶ Replaying…";
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const steps = recordings[store].steps;
+  $("record-btn").disabled    = true;
+  $("record-btn").textContent = "▶ Replaying…";
   await chrome.runtime.sendMessage({ type: "REPLAY_STEPS", steps, tabId: tab.id });
-  await new Promise(r => setTimeout(r, 2000));
-  $("record-btn").disabled     = false;
-  $("record-btn").textContent  = "🔴 Start Recording";
-  document.querySelector('[data-tab="analyze"]').click();
-  $("analyze-btn").click();
+  // Hand off to the auto-capture chain: content.js will fire CHECKOUT_DETECTED
+  // once it reaches the checkout page, which triggers autoCapture in background.js.
+  // autoCapture then handles $10 save → BUILD_CART_TO_TARGET for $25/$50/$75/$100.
+  $("record-btn").disabled    = false;
+  $("record-btn").textContent = "🔴 Record $10 Session";
+  window.close();
 }
 
 $("record-btn").addEventListener("click", async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const store = new URL(tab.url).hostname.replace(/^www\./, "");
+  const url = tab?.url || "";
+  if (!/doordash\.com|instacart\.com|ubereats\.com/i.test(url)) {
+    alert("Navigate to DoorDash, Instacart, or Uber Eats first.");
+    return;
+  }
+  const store = new URL(url).hostname.replace(/^www\./, "");
   await chrome.runtime.sendMessage({ type: "START_RECORDING", store, tabId: tab.id });
   window.close();
 });
