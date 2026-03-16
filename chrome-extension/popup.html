@@ -45,6 +45,28 @@
     }
     .chip.active { border-color: #7c6fe0; color: #c0baff; background: #1a1a2e; }
 
+    /* ── Start / Next buttons ── */
+    #start-section { padding: 12px 16px 0; }
+    #start-btn {
+      display: block; width: 100%; padding: 11px;
+      border: none; border-radius: 10px;
+      background: linear-gradient(135deg, #4caf82, #2e9e6a);
+      color: #fff; font-size: 14px; font-weight: 700;
+      cursor: pointer; transition: opacity .15s;
+    }
+    #start-btn:hover { opacity: 0.88; }
+    #start-hint { font-size: 11px; color: #555; text-align: center; margin-top: 6px; }
+
+    #next-section { padding: 12px 16px 0; }
+    #next-btn {
+      display: block; width: 100%; padding: 11px;
+      border: none; border-radius: 10px;
+      background: linear-gradient(135deg, #7c6fe0, #5b8dee);
+      color: #fff; font-size: 14px; font-weight: 700;
+      cursor: pointer; transition: opacity .15s;
+    }
+    #next-btn:hover { opacity: 0.88; }
+
     /* ══════════════ WEEKLY TAB ══════════════ */
     #tab-weekly { display: none; }
 
@@ -180,6 +202,15 @@
 
   <!-- ══ WEEKLY TAB ══ -->
   <div id="tab-weekly">
+
+    <!-- Start / Next action buttons (shown when on a platform page) -->
+    <div id="start-section" style="display:none">
+      <button id="start-btn">▶ Start with $10</button>
+      <div id="start-hint">Go to checkout with your ~$10 cart</div>
+    </div>
+    <div id="next-section" style="display:none">
+      <button id="next-btn">Next →</button>
+    </div>
 
     <!-- No captures yet -->
     <div id="weekly-empty">

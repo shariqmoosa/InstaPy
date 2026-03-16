@@ -27,21 +27,88 @@ $("tab-weekly").style.display = "block";
 
 const BASKETS    = [10, 25, 50, 75, 100];
 const PLAT_SHORT = { "DoorDash": "DD", "Instacart": "IC", "Uber Eats": "UE" };
+const PLATFORM_HOST = { "DoorDash": "doordash.com", "Instacart": "instacart.com", "Uber Eats": "ubereats.com" };
 
 let _captures = {};
+let _lastCapture = null;
+let _activeTab = null;
 
 async function refreshWeekly() {
   const resp = await chrome.runtime.sendMessage({ type: "GET_CAPTURES" });
-  _captures = resp?.captures || {};
+  _captures    = resp?.captures    || {};
+  _lastCapture = resp?.lastCapture || null;
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  _activeTab = tab;
   renderWeekly();
 }
 
 function renderWeekly() {
+  const url        = _activeTab?.url || "";
+  const onPlatform = /doordash\.com|instacart\.com|ubereats\.com/i.test(url);
+  const onCheckout = /\/checkout|\/confirm-order|\/place_order/i.test(url);
+  const onStore    = onPlatform && !onCheckout;
+
+  // Start button: on platform store page, no active session yet for this store
+  const showStart = onStore;
+  $("start-section").style.display = showStart ? "block" : "none";
+
+  // Next button: last capture exists + remaining baskets
+  let nextBasket = null;
+  if (_lastCapture) {
+    nextBasket = BASKETS.find(b => !_captures[jobKey(_lastCapture.platform, _lastCapture.retailerName, b, _lastCapture.membership)]);
+  }
+  const showNext = onStore && !!nextBasket && !!_lastCapture;
+  $("next-section").style.display = showNext ? "block" : "none";
+  if (showNext) {
+    const plat = PLAT_SHORT[_lastCapture.platform] || _lastCapture.platform;
+    $("next-btn").textContent = `Next → Build $${nextBasket} cart  (${plat} · ${_lastCapture.retailerName} · ${_lastCapture.membership})`;
+    $("next-btn").dataset.target = nextBasket;
+  }
+
   const hasData = Object.keys(_captures).length > 0;
   $("weekly-empty").style.display = hasData ? "none"  : "block";
   $("weekly-job").style.display   = hasData ? "block" : "none";
   if (hasData) renderSessions();
 }
+
+function jobKey(platform, retailerName, basket, membership) {
+  return `${platform}|${retailerName}|${basket}|${membership}`.toLowerCase();
+}
+
+// ── Start button ──────────────────────────────────────────────────────────────
+
+$("start-btn").addEventListener("click", async () => {
+  if (!_activeTab) return;
+  $("start-btn").textContent = "Going to checkout…";
+  $("start-btn").disabled = true;
+  try {
+    const resp = await chrome.tabs.sendMessage(_activeTab.id, { type: "CLICK_CHECKOUT" });
+    if (resp?.ok) { window.close(); }
+    else { $("start-hint").textContent = "Checkout button not found — navigate to your cart first."; }
+  } catch {
+    $("start-hint").textContent = "Could not connect to page — try refreshing.";
+  } finally {
+    $("start-btn").textContent = "▶ Start with $10";
+    $("start-btn").disabled = false;
+  }
+});
+
+// ── Next button ───────────────────────────────────────────────────────────────
+
+$("next-btn").addEventListener("click", async () => {
+  if (!_activeTab || !_lastCapture) return;
+  const target = Number($("next-btn").dataset.target);
+  $("next-btn").textContent = `Building $${target} cart…`;
+  $("next-btn").disabled = true;
+  chrome.tabs.sendMessage(_activeTab.id, {
+    type:            "BUILD_CART_TO_TARGET",
+    target,
+    currentSubtotal: 0,
+    platform:        _lastCapture.platform,
+  }).catch(() => {});
+  window.close();
+});
 
 function renderSessions() {
   // Group by platform + retailerName + membership using stored fields

@@ -88,8 +88,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === "GET_CAPTURES") {
     chrome.storage.local.get({ weeklyCaptures: {} }, ({ weeklyCaptures }) => {
-      chrome.storage.session.get({ checkoutCtx: null }, ({ checkoutCtx }) => {
-        sendResponse({ captures: weeklyCaptures, checkoutCtx });
+      chrome.storage.session.get({ checkoutCtx: null, lastCapture: null }, ({ checkoutCtx, lastCapture }) => {
+        sendResponse({ captures: weeklyCaptures, checkoutCtx, lastCapture });
       });
     });
     return true;
@@ -162,7 +162,7 @@ async function autoCapture(msg, tabId) {
       capturedAt:   new Date().toISOString(),
     };
     await setLocal({ weeklyCaptures: allCaptures });
-    await setSession({ checkoutCtx: null });
+    await setSession({ checkoutCtx: null, lastCapture: { platform: msg.platform, retailerName, membership } });
 
     const doneForCombo = BASKETS.filter(b => allCaptures[jobKey(msg.platform, retailerName, b, membership)]).length;
     setBadge(tabId, "✓", "#4caf82");

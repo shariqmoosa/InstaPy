@@ -15,6 +15,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "SHOW_TOAST")           { showToast(msg.text, msg.style); }
   if (msg.type === "SHOW_COMBO_BANNER")    { showComboBanner(msg); }
   if (msg.type === "BUILD_CART_TO_TARGET") { buildCartToTarget(msg); }
+  if (msg.type === "CLICK_CHECKOUT") {
+    const btn = _findCheckoutButton();
+    if (btn) { btn.click(); sendResponse({ ok: true }); }
+    else sendResponse({ ok: false });
+    return true;
+  }
 });
 
 // ── Text extraction ───────────────────────────────────────────────────────────
