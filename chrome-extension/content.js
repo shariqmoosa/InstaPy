@@ -253,7 +253,7 @@ async function buildCartToTarget({ target, currentSubtotal, platform }) {
 
   // Go back to store (cart stays intact on SPAs)
   history.back();
-  await _sleep(2800);
+  await _sleep(5000); // wait longer for DoorDash SPA to fully load the cart
 
   const lo = _BASKET_LO[target] ?? target * 0.7;
   const hi = _BASKET_HI[target] ?? target * 1.5;
@@ -276,7 +276,7 @@ async function buildCartToTarget({ target, currentSubtotal, platform }) {
     }
 
     btn.click();
-    await _sleep(750);
+    await _sleep(1200);
     iters++;
   }
 
