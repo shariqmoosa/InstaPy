@@ -131,56 +131,63 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 async function autoCapture(msg, tabId) {
   // Guard: don't double-capture same tab
   const lockKey = `capturing_${tabId}`;
-  const lockState = await getSession(lockKey);
-  if (lockState) return;
+  if (await getSession(lockKey)) return;
   await setSession({ [lockKey]: true });
 
   setBadge(tabId, "…", "#7c6fe0");
 
   try {
     const { weeklyJob } = await getLocal("weeklyJob");
-    if (!weeklyJob) {
-      // No job loaded — just set GO badge for manual popup capture
-      setBadge(tabId, "GO", "#4caf82");
-      return;
-    }
+    if (!weeklyJob) { setBadge(tabId, "GO", "#4caf82"); return; }
 
     const settings = await getSettings();
-    const prompt   = buildAutoPrompt(msg.pageText, msg.url, msg.platform);
-    const result   = await callOllama(
-      settings.ollamaModel || "llama3.2",
-      prompt,
-      settings.ollamaApiKey || null
-    );
 
-    // Match retailer
-    const storeName = result.store || msg.retailer || "";
-    const matched   = matchRetailer(storeName, weeklyJob.retailers);
-    if (!matched) {
-      setBadge(tabId, "?", "#e0a020");
-      showTabToast(tabId, `⚠️ Store "${storeName}" not in job — open popup to capture manually`, "err");
-      return;
+    // ── Fast path: combo already pinned for this tab ──────────────────────────
+    // After the first capture the combo (platform+retailer+city+membership) is
+    // pinned in session.  Subsequent checkouts on the same tab skip store/
+    // membership detection — we only need to extract the fee numbers.
+    const pinned = await getSession(`pinned_${tabId}`);
+
+    let result, matched, membership;
+
+    if (pinned) {
+      matched    = pinned.matched;
+      membership = pinned.membership;
+      const prompt = buildFastPrompt(msg.pageText, msg.url, msg.platform, matched.retailerName, membership);
+      result = await callOllama(settings.ollamaModel || "llama3.2", prompt, settings.ollamaApiKey || null);
+    } else {
+      // ── Full path: detect store + membership from page ──────────────────────
+      const prompt = buildAutoPrompt(msg.pageText, msg.url, msg.platform);
+      result = await callOllama(settings.ollamaModel || "llama3.2", prompt, settings.ollamaApiKey || null);
+
+      const storeName = result.store || msg.retailer || "";
+      matched = matchRetailer(storeName, weeklyJob.retailers);
+      if (!matched) {
+        setBadge(tabId, "?", "#e0a020");
+        showTabToast(tabId, `⚠️ "${storeName}" not in job — open popup to capture manually`, "err");
+        return;
+      }
+      membership = result.membership_status === "Member" ? "Member" : "Non-Member";
     }
 
-    // Auto-detect basket size from item_total (nearest target)
+    // Basket size from item_total
     const itemTotal = parseFloat(result.item_total);
     const basket    = nearestBasket(itemTotal);
     if (!basket) {
       setBadge(tabId, "GO", "#4caf82");
-      showTabToast(tabId, "⚠️ Could not detect basket size — select it in popup", "err");
+      showTabToast(tabId, "⚠️ Could not read basket amount — build your cart and try again", "err");
       return;
     }
 
-    // Membership from AI result (it detects DashPass/Instacart+/Uber One)
-    const membership = result.membership_status === "Member" ? "Member" : "Non-Member";
-
     const key = jobKey(msg.platform, matched.retailerName, matched.city, basket, membership);
 
-    // Skip if already captured
+    // Skip if already captured (show banner so user knows where they are)
     if (weeklyJob.captures[key]) {
       setBadge(tabId, "✓", "#4caf82");
       setTimeout(() => setBadge(tabId, "", "#4caf82"), 3000);
-      showTabToast(tabId, `✅ Already captured — ${msg.platform} / ${matched.retailerName} / $${basket} / ${membership}`, "ok");
+      showTabToast(tabId, `Already captured — $${basket} / ${membership}`, "ok");
+      sendComboBanner(tabId, weeklyJob, msg.platform, matched.retailerName, matched.city, membership);
+      if (!pinned) await setSession({ [`pinned_${tabId}`]: { matched, membership } });
       return;
     }
 
@@ -199,27 +206,68 @@ async function autoCapture(msg, tabId) {
       capturedAt: new Date().toISOString(),
     };
     await setLocal({ weeklyJob });
-
-    // Clear context and badge
-    await setSession({ checkoutCtx: null, [lockKey]: null });
-    setBadge(tabId, "✓", "#4caf82");
-    setTimeout(() => setBadge(tabId, "", "#4caf82"), 3000);
+    await setSession({ checkoutCtx: null });
 
     const done  = Object.keys(weeklyJob.captures).length;
     const total = weeklyJob.retailers.length * 3 * 5 * 2;
-    showTabToast(
-      tabId,
-      `✅ Auto-saved: ${msg.platform} / ${matched.retailerName} / $${basket} / ${membership}  (${done}/${total})`,
-      "ok"
+
+    setBadge(tabId, "✓", "#4caf82");
+    setTimeout(() => setBadge(tabId, "", "#4caf82"), 3000);
+    showTabToast(tabId, `✅ Saved $${basket} / ${membership}  (${done}/${total})`, "ok");
+
+    // Pin combo so subsequent checkouts on this tab use the fast path
+    await setSession({ [`pinned_${tabId}`]: { matched, membership } });
+
+    // Send/update the combo progress banner
+    sendComboBanner(tabId, weeklyJob, msg.platform, matched.retailerName, matched.city, membership);
+
+    // Check if all 5 baskets done for current membership → prompt to switch
+    const allThisMembershipDone = BASKETS.every(b =>
+      !!weeklyJob.captures[jobKey(msg.platform, matched.retailerName, matched.city, b, membership)]
     );
+    if (allThisMembershipDone) {
+      const other = membership === "Member" ? "Non-Member" : "Member";
+      const allOtherDone = BASKETS.every(b =>
+        !!weeklyJob.captures[jobKey(msg.platform, matched.retailerName, matched.city, b, other)]
+      );
+      if (!allOtherDone) {
+        // Flip the pin to the other membership — next checkouts auto-capture as the other side
+        await setSession({ [`pinned_${tabId}`]: { matched, membership: other } });
+        showTabToast(tabId,
+          `🎉 All ${membership} baskets done!  Now ${other === "Member" ? "activate" : "deactivate"} membership and repeat.`,
+          "ok"
+        );
+      } else {
+        // Both memberships complete for this retailer on this platform
+        await setSession({ [`pinned_${tabId}`]: null });
+        showTabToast(tabId,
+          `🏁 ${matched.retailerName} complete on ${msg.platform}! Open popup → next store.`,
+          "ok"
+        );
+      }
+    }
 
   } catch (err) {
     setBadge(tabId, "GO", "#4caf82");
-    // Don't show error toast — just leave GO badge so user can capture manually
-    console.error("[Fee Checker] Auto-capture failed:", err.message);
+    console.error("[Fee Checker] Auto-capture:", err.message);
   } finally {
     await setSession({ [lockKey]: null });
   }
+}
+
+// Send a combo-progress banner to the content script
+function sendComboBanner(tabId, weeklyJob, platform, retailerName, city, membership) {
+  const capturedBaskets  = [];
+  const remainingBaskets = [];
+  for (const b of BASKETS) {
+    const k = jobKey(platform, retailerName, city, b, membership);
+    (weeklyJob.captures[k] ? capturedBaskets : remainingBaskets).push(b);
+  }
+  chrome.tabs.sendMessage(tabId, {
+    type: "SHOW_COMBO_BANNER",
+    platform, retailerName, city, membership,
+    capturedBaskets, remainingBaskets,
+  }).catch(() => {});
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -280,7 +328,38 @@ async function callOllama(model, prompt, apiKey) {
   return JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim());
 }
 
-// ── Auto-capture prompt ───────────────────────────────────────────────────────
+// ── Prompts ───────────────────────────────────────────────────────────────────
+
+// Fast prompt: store + membership already known (pinned), only extract fees.
+function buildFastPrompt(pageText, url, platform, retailerName, membership) {
+  return `You are extracting delivery fees from a ${platform} checkout page for ${retailerName}.
+Membership: ${membership} (${membership === "Member" ? "active DashPass/Instacart+/Uber One" : "no membership"}).
+
+Page URL: ${url}
+Page content:
+---
+${pageText.slice(0, 10000)}
+---
+
+Return ONLY valid JSON — no markdown, no explanation:
+{
+  "item_total": "<merchandise subtotal before fees>",
+  "delivery_fee": "<delivery fee or '0' if free>",
+  "service_fee": "<platform service fee>",
+  "regulatory_fee": "<regulatory fee or null>",
+  "long_distance_fee": "<long distance fee or null>",
+  "small_order_fee": "<small order fee or null>",
+  "taxes": "<total taxes>",
+  "order_total": "<grand total>",
+  "delivery_time_min": <minimum delivery minutes as integer>,
+  "delivery_time_max": <maximum delivery minutes as integer>,
+  "priority_delivery_time": <priority option minutes or null>,
+  "priority_delivery_fee": "<priority extra cost or null>",
+  "minimum_order": "<minimum order or null>",
+  "notes": "<brief observation or null>"
+}
+Numbers as strings without $ signs. null for anything not visible.`;
+}
 
 function buildAutoPrompt(pageText, url, platform) {
   return `You are extracting delivery fee data from a ${platform} checkout page.

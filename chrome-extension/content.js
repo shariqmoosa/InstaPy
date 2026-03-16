@@ -12,7 +12,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "UPDATE_COUNT")     { updateOverlayCount(msg.count); }
   if (msg.type === "RECORDING_SAVED")  { showSavedState(msg.store, msg.stepCount); }
   if (msg.type === "REPLAY_DONE")      { showToast("✅ Replay done — analyzing fees…"); }
-  if (msg.type === "SHOW_TOAST")       { showToast(msg.text, msg.style); }
+  if (msg.type === "SHOW_TOAST")        { showToast(msg.text, msg.style); }
+  if (msg.type === "SHOW_COMBO_BANNER") { showComboBanner(msg); }
 });
 
 // ── Text extraction ───────────────────────────────────────────────────────────
@@ -232,6 +233,64 @@ function _restoreRecordingState(attempt) {
 }
 
 _restoreRecordingState();
+
+// ── Combo progress banner ─────────────────────────────────────────────────────
+// Persistent pill at bottom of page showing which basket sizes are done.
+// Appears after first capture, updates after each subsequent capture on same tab.
+
+const _ALL_BASKETS  = [10, 25, 50, 75, 100];
+const _PLAT_ABBREV  = { "DoorDash": "DD", "Instacart": "IC", "Uber Eats": "UE" };
+let   _comboBanner  = null;
+
+function showComboBanner({ platform, retailerName, membership, capturedBaskets, remainingBaskets }) {
+  if (_comboBanner) _comboBanner.remove();
+
+  // All done for this membership — congratulate and dismiss
+  if (remainingBaskets.length === 0) {
+    showToast(`🎉 All ${membership} baskets done for ${retailerName}!`, "ok");
+    return;
+  }
+
+  const plat  = _PLAT_ABBREV[platform] || platform;
+  const chips = _ALL_BASKETS.map(b => {
+    if (capturedBaskets.includes(b))
+      return `<span style="color:#4caf82;font-weight:600">$${b}&nbsp;✓</span>`;
+    if (b === remainingBaskets[0])
+      return `<span style="background:#221a3a;color:#a090f8;font-weight:700;padding:2px 7px;border-radius:5px">$${b}&nbsp;▶</span>`;
+    return `<span style="color:#3a3a50">$${b}</span>`;
+  }).join(`<span style="color:#222;padding:0 3px">·</span>`);
+
+  _comboBanner = document.createElement("div");
+  _comboBanner.id = "_fc_combo";
+  _comboBanner.innerHTML = `
+    <span style="color:#555;font-size:11px;margin-right:10px;white-space:nowrap">${plat}&nbsp;·&nbsp;${retailerName}&nbsp;·&nbsp;${membership}</span>
+    <span style="display:flex;align-items:center;gap:4px">${chips}</span>
+    <button id="_fc_combo_x" style="background:none;border:none;color:#333;cursor:pointer;margin-left:12px;font-size:14px;line-height:1;padding:0">✕</button>`;
+  Object.assign(_comboBanner.style, {
+    position:   "fixed",
+    bottom:     "20px",
+    left:       "50%",
+    transform:  "translateX(-50%)",
+    background: "#0d0d18",
+    border:     "1px solid #1c1c2c",
+    color:      "#fff",
+    padding:    "9px 16px",
+    borderRadius: "24px",
+    zIndex:     "2147483647",
+    fontFamily: "monospace",
+    fontSize:   "13px",
+    display:    "flex",
+    alignItems: "center",
+    gap:        "4px",
+    boxShadow:  "0 6px 28px rgba(0,0,0,0.65)",
+    whiteSpace: "nowrap",
+  });
+  document.body.appendChild(_comboBanner);
+  document.getElementById("_fc_combo_x").addEventListener("click", () => {
+    _comboBanner?.remove();
+    _comboBanner = null;
+  });
+}
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 
