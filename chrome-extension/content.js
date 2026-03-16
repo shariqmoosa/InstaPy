@@ -12,8 +12,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "UPDATE_COUNT")     { updateOverlayCount(msg.count); }
   if (msg.type === "RECORDING_SAVED")  { showSavedState(msg.store, msg.stepCount); }
   if (msg.type === "REPLAY_DONE")      { showToast("✅ Replay done — analyzing fees…"); }
-  if (msg.type === "SHOW_TOAST")        { showToast(msg.text, msg.style); }
-  if (msg.type === "SHOW_COMBO_BANNER") { showComboBanner(msg); }
+  if (msg.type === "SHOW_TOAST")           { showToast(msg.text, msg.style); }
+  if (msg.type === "SHOW_COMBO_BANNER")    { showComboBanner(msg); }
+  if (msg.type === "BUILD_CART_TO_TARGET") { buildCartToTarget(msg); }
 });
 
 // ── Text extraction ───────────────────────────────────────────────────────────
@@ -233,6 +234,133 @@ function _restoreRecordingState(attempt) {
 }
 
 _restoreRecordingState();
+
+// ── Cart automation ───────────────────────────────────────────────────────────
+// After the user manually builds the first cart, the extension automatically
+// builds the remaining basket sizes by:
+//   1. Going back to the store page  (history.back)
+//   2. Clicking the cheapest item's + button until subtotal hits the target range
+//   3. Clicking the checkout button
+// notifyCheckout() then fires naturally, triggering auto-capture in background.
+
+const _BASKET_LO = { 10: 1,    25: 17.5, 50: 37.5, 75: 62.5, 100: 87.5 };
+const _BASKET_HI = { 10: 17.49, 25: 37.49, 50: 62.49, 75: 87.49, 100: 999 };
+
+const _sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function buildCartToTarget({ target, currentSubtotal, platform }) {
+  showToast(`🛒 Building $${target} basket…`, "ok");
+
+  // Go back to store (cart stays intact on SPAs)
+  history.back();
+  await _sleep(2800);
+
+  const lo = _BASKET_LO[target] ?? target * 0.7;
+  const hi = _BASKET_HI[target] ?? target * 1.5;
+
+  let iters = 0;
+  while (iters < 60) {
+    const sub = _readCartSubtotal() ?? currentSubtotal;
+
+    if (sub >= lo && sub <= hi) break;  // in range — done
+
+    if (sub > hi) {
+      showToast(`⚠️ Cart $${sub.toFixed(2)} overshot $${target} range — adjust manually then go to checkout`, "err");
+      return;
+    }
+
+    const btn = _findPlusButton();
+    if (!btn) {
+      showToast(`⚠️ Can't find a cart + button — add items to ~$${target} then go to checkout`, "err");
+      return;
+    }
+
+    btn.click();
+    await _sleep(750);
+    iters++;
+  }
+
+  if (iters >= 60) {
+    showToast(`⚠️ Couldn't reach $${target} in 60 clicks — add remaining items manually`, "err");
+    return;
+  }
+
+  // Click checkout — notifyCheckout() will fire and auto-capture the result
+  await _sleep(500);
+  const checkoutBtn = _findCheckoutButton();
+  if (checkoutBtn) {
+    checkoutBtn.click();
+  } else {
+    showToast(`🛒 Cart ready at ~$${target} — click "Go to Checkout" to continue`, "ok");
+  }
+}
+
+function _readCartSubtotal() {
+  const text = extractText();
+  // Matches "Subtotal $9.87" or "Item total\n$24.56" etc.
+  const patterns = [
+    /(?:items?\s*total|item\s+subtotal|subtotal|your\s+subtotal)[\s\n$]*\$?\s*([\d,]+\.\d{2})/i,
+    /\$\s*([\d,]+\.\d{2})\s*\n?(?:subtotal|item\s+total)/i,
+  ];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m) {
+      const v = parseFloat(m[1].replace(/,/g, ""));
+      if (v > 0 && v < 500) return v;
+    }
+  }
+  return null;
+}
+
+function _findPlusButton() {
+  // Platform-specific test-ids first, then generic aria-label, then "+" text fallback.
+  // We take the LAST visible match — in most cart layouts the last + button belongs to
+  // the cheapest item (items are listed top=expensive to bottom=cheap, or we just pick
+  // any item since basket ranges are wide enough to tolerate any item price <$20).
+  const selectors = [
+    '[data-testid="Cart-Item-incrementButton"]',   // DoorDash
+    '[data-testid="increment-btn"]',               // DoorDash alt
+    '[data-testid="cart_item_increment"]',         // Instacart
+    'button[aria-label*="Increase quantity"]',     // Uber Eats / generic
+    'button[aria-label*="Add one more"]',          // Instacart
+    'button[aria-label*="Increase"]',              // generic
+    '[data-testid*="increment"]',                  // generic test-id
+    '[data-testid*="plus"]',                       // generic test-id
+  ];
+  for (const sel of selectors) {
+    const visible = Array.from(document.querySelectorAll(sel)).filter(el => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    });
+    if (visible.length) return visible[visible.length - 1];
+  }
+  // Last-resort: any visible button whose only text is "+"
+  return Array.from(document.querySelectorAll('button, [role="button"]')).find(el => {
+    const t = (el.textContent || "").trim();
+    const r = el.getBoundingClientRect();
+    return (t === "+" || t === "＋") && r.width > 0 && r.height > 0;
+  }) || null;
+}
+
+function _findCheckoutButton() {
+  const selectors = [
+    '[data-testid="CartFooter-StartOrderButton"]', // DoorDash
+    '[data-testid="checkout-button"]',             // DoorDash alt
+    '[data-testid="go_to_checkout"]',              // Instacart
+    '[data-testid="cart_checkout_button"]',        // Uber Eats
+    'a[href*="/checkout"]',                        // generic link
+  ];
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (el) { const r = el.getBoundingClientRect(); if (r.width > 0) return el; }
+  }
+  // Semantic fallback: button/link containing "checkout" text
+  return Array.from(document.querySelectorAll('button, a, [role="button"]')).find(el => {
+    const t = (el.textContent || "").trim().toLowerCase();
+    const r = el.getBoundingClientRect();
+    return (t.includes("checkout") || t === "place order") && r.width > 0;
+  }) || null;
+}
 
 // ── Combo progress banner ─────────────────────────────────────────────────────
 // Persistent pill at bottom of page showing which basket sizes are done.

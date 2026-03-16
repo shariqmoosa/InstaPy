@@ -218,27 +218,38 @@ async function autoCapture(msg, tabId) {
     // Pin combo so subsequent checkouts on this tab use the fast path
     await setSession({ [`pinned_${tabId}`]: { matched, membership } });
 
+    // Remaining baskets for this membership AFTER the current save
+    const remaining = BASKETS.filter(b =>
+      !weeklyJob.captures[jobKey(msg.platform, matched.retailerName, matched.city, b, membership)]
+    );
+
     // Send/update the combo progress banner
     sendComboBanner(tabId, weeklyJob, msg.platform, matched.retailerName, matched.city, membership);
 
-    // Check if all 5 baskets done for current membership → prompt to switch
-    const allThisMembershipDone = BASKETS.every(b =>
-      !!weeklyJob.captures[jobKey(msg.platform, matched.retailerName, matched.city, b, membership)]
-    );
-    if (allThisMembershipDone) {
+    if (remaining.length > 0) {
+      // Auto-build the next basket: content script navigates back, adds items, goes to checkout.
+      // Small delay so the "Saved" toast is visible before "Building…" toast appears.
+      setTimeout(() => {
+        chrome.tabs.sendMessage(tabId, {
+          type:           "BUILD_CART_TO_TARGET",
+          target:         remaining[0],
+          currentSubtotal: itemTotal,
+          platform:       msg.platform,
+        }).catch(() => {});
+      }, 1500);
+    } else {
+      // All 5 baskets captured for this membership — prompt to switch
       const other = membership === "Member" ? "Non-Member" : "Member";
       const allOtherDone = BASKETS.every(b =>
         !!weeklyJob.captures[jobKey(msg.platform, matched.retailerName, matched.city, b, other)]
       );
       if (!allOtherDone) {
-        // Flip the pin to the other membership — next checkouts auto-capture as the other side
         await setSession({ [`pinned_${tabId}`]: { matched, membership: other } });
         showTabToast(tabId,
-          `🎉 All ${membership} baskets done!  Now ${other === "Member" ? "activate" : "deactivate"} membership and repeat.`,
+          `🎉 All ${membership} done! ${other === "Member" ? "Activate" : "Deactivate"} membership → build a $10 cart → go to checkout.`,
           "ok"
         );
       } else {
-        // Both memberships complete for this retailer on this platform
         await setSession({ [`pinned_${tabId}`]: null });
         showTabToast(tabId,
           `🏁 ${matched.retailerName} complete on ${msg.platform}! Open popup → next store.`,
