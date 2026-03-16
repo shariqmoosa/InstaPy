@@ -8,6 +8,18 @@ Compare multiple stores (same item):
         --stores ubereats:https://... doordash:https://... instacart:https://... \\
         --zip "90210"
 
+Weekly batch run (client delivery-fee data collection):
+    python -m shopping_agent.main weekly \\
+        --input weekly_input.csv \\
+        --output weekly_output.csv \\
+        --date 2026-03-16
+
+    Resume a partial run:
+    python -m shopping_agent.main weekly \\
+        --input weekly_input.csv \\
+        --output weekly_output.csv \\
+        --resume
+
 Record a store session (opens visible browser):
     python -m shopping_agent.main record --url "https://www.ubereats.com/store/7-eleven/..."
 
@@ -25,6 +37,7 @@ from .agent import ShoppingAgent
 from .recorder import SiteRecorder
 from .playbook import PlaybookRunner
 from .vpn import AccountManager, SURFSHARK_LOCATIONS
+from .weekly_runner import WeeklyRunner, PLATFORMS, BASKET_SIZES, MEMBERSHIPS
 
 
 def _print_result(result, label=""):
@@ -154,6 +167,39 @@ def cmd_record(args):
     return 0
 
 
+def cmd_weekly(args):
+    """Run the weekly batch delivery-fee data collection."""
+    from datetime import date as _date
+
+    collected_date = args.date or _date.today().isoformat()
+
+    # Parse platform / basket / membership filters
+    platforms = args.platforms or list(PLATFORMS.keys())
+    basket_sizes = [int(b) for b in args.baskets.split(",")] if args.baskets else BASKET_SIZES
+    memberships = args.memberships or MEMBERSHIPS
+
+    runner = WeeklyRunner(
+        provider=args.provider,
+        api_key=args.api_key,
+        model=args.model,
+        headless=not args.no_headless,
+        platforms=platforms,
+        basket_sizes=basket_sizes,
+        memberships=memberships,
+        verbose=True,
+        resume_output=args.output if args.resume else None,
+    )
+
+    rows = runner.run(
+        input_csv=args.input,
+        output_csv=args.output,
+        collected_date=collected_date,
+        address_override=args.address,
+    )
+    print(f"\nWrote {len(rows)} rows → {args.output}")
+    return 0
+
+
 def cmd_replay(args):
     runner = PlaybookRunner(headless=not args.no_headless)
     results = runner.run_many(args.stores, playbook_domain=args.playbook)
@@ -226,6 +272,36 @@ def main():
 
     account_sub.add_parser("locations", help="List all available Surfshark server shortcodes")
 
+    # Weekly batch run
+    p_weekly = sub.add_parser(
+        "weekly",
+        help="Batch-collect delivery fees for a new week (DoorDash / Instacart / Uber Eats)",
+    )
+    p_weekly.add_argument("--input", required=True, metavar="FILE",
+                          help="Weekly input CSV (city, density, retailer type, retailer name)")
+    p_weekly.add_argument("--output", required=True, metavar="FILE",
+                          help="Output CSV path (45-column format)")
+    p_weekly.add_argument("--date", default=None,
+                          help="Collection date YYYY-MM-DD (default: today)")
+    p_weekly.add_argument("--address", default=None,
+                          help="Override delivery address for all rows")
+    p_weekly.add_argument("--platforms", nargs="+",
+                          choices=list(PLATFORMS.keys()),
+                          help="Limit to specific platforms (default: all three)")
+    p_weekly.add_argument("--baskets", default=None,
+                          metavar="10,25,50,75,100",
+                          help="Comma-separated basket sizes in dollars (default: 10,25,50,75,100)")
+    p_weekly.add_argument("--memberships", nargs="+",
+                          choices=MEMBERSHIPS,
+                          help="Limit to specific membership statuses")
+    p_weekly.add_argument("--resume", action="store_true",
+                          help="Skip rows already present in --output (resume a partial run)")
+    p_weekly.add_argument("--provider", default="auto",
+                          choices=["auto", "claude", "openai", "gemini"])
+    p_weekly.add_argument("--api-key", default=None)
+    p_weekly.add_argument("--model", default=None)
+    p_weekly.add_argument("--no-headless", action="store_true")
+
     # Record
     p_record = sub.add_parser("record", help="Record a browser session as a playbook")
     p_record.add_argument("--url", required=True)
@@ -249,6 +325,8 @@ def main():
         return cmd_compare(args)
     elif args.cmd == "account":
         return cmd_account(args)
+    elif args.cmd == "weekly":
+        return cmd_weekly(args)
     elif args.cmd == "record":
         return cmd_record(args)
     elif args.cmd == "replay":
