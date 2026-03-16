@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Fee Checker",
-  "version": "1.1",
+  "version": "1.2",
   "description": "Instantly reveal hidden delivery, service fees and taxes on any shopping page. Train it once per store — it navigates automatically next time.",
   "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": [

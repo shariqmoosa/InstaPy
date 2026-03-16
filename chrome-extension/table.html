@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Fee Checker — Data Table</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f0f11; color: #e8e8ea; font-size: 13px;
+      min-height: 100vh;
+    }
+
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 24px; border-bottom: 1px solid #1e1e24;
+      position: sticky; top: 0; background: #0f0f11; z-index: 10;
+    }
+    .logo { display: flex; align-items: center; gap: 10px; }
+    .logo-icon {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, #7c6fe0, #5b8dee);
+      border-radius: 9px; display: flex; align-items: center;
+      justify-content: center; font-size: 17px;
+    }
+    .logo-text { font-weight: 700; font-size: 16px; color: #fff; }
+    .logo-sub  { font-size: 12px; color: #555; margin-top: 1px; }
+
+    .toolbar { display: flex; align-items: center; gap: 10px; }
+    .tool-btn {
+      padding: 6px 14px; border: 1px solid #2a2a35; border-radius: 8px;
+      background: none; color: #888; font-size: 12px; cursor: pointer;
+      transition: all .15s;
+    }
+    .tool-btn:hover { border-color: #555; color: #ccc; }
+    .tool-btn.danger { color: #e05353; border-color: #3a1a1a; }
+    .tool-btn.danger:hover { border-color: #e05353; }
+    #live-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #4caf82; animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    /* metric filter */
+    .filter-bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 24px; border-bottom: 1px solid #1e1e24;
+      flex-wrap: wrap;
+    }
+    .filter-bar span { font-size: 11px; color: #444; margin-right: 4px; }
+    .fchip {
+      padding: 3px 12px; border: 1px solid #2a2a35; border-radius: 20px;
+      background: none; color: #555; font-size: 11px; cursor: pointer; transition: all .15s;
+    }
+    .fchip.active { border-color: #7c6fe0; color: #c0baff; background: #1a1a2e; }
+
+    /* main table */
+    .table-wrap { padding: 20px 24px; overflow-x: auto; }
+    .empty-state {
+      text-align: center; padding: 80px 24px; color: #333;
+    }
+    .empty-state h2 { font-size: 18px; color: #444; margin-bottom: 8px; }
+    .empty-state p  { font-size: 13px; line-height: 1.7; }
+    .empty-state code {
+      background: #1a1a22; padding: 2px 8px; border-radius: 4px;
+      color: #7c6fe0; font-size: 12px;
+    }
+
+    table {
+      border-collapse: collapse; min-width: 100%;
+    }
+    thead th {
+      padding: 10px 16px; text-align: center;
+      background: #17171f; color: #666; font-size: 11px; font-weight: 700;
+      border-bottom: 2px solid #1e1e24; white-space: nowrap;
+      text-transform: uppercase; letter-spacing: .5px;
+    }
+    thead th.store-col { text-align: left; min-width: 150px; color: #555; }
+    thead th.size-col  { min-width: 130px; color: #7c6fe0; font-size: 13px; text-transform: none; letter-spacing: 0; }
+
+    tbody td {
+      padding: 12px 16px; vertical-align: top;
+      border-bottom: 1px solid #17171f;
+    }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover td { background: #12121a; }
+
+    td.store-col {
+      font-weight: 700; color: #e8e8ea; font-size: 13px;
+      vertical-align: middle;
+    }
+    td.store-col .store-domain { font-size: 10px; color: #444; font-weight: 400; margin-top: 2px; }
+
+    /* cell content */
+    .cell-empty {
+      text-align: center; color: #252530; font-size: 18px;
+      padding: 14px 0;
+    }
+    .cell-data { display: flex; flex-direction: column; gap: 5px; }
+    .metric-line {
+      display: flex; justify-content: space-between; align-items: baseline;
+      gap: 8px;
+    }
+    .metric-label { color: #555; font-size: 10px; white-space: nowrap; }
+    .metric-value { color: #e8e8ea; font-variant-numeric: tabular-nums; text-align: right; }
+    .metric-value.free  { color: #4caf82; font-weight: 700; }
+    .metric-value.time  { color: #5b8dee; }
+    .metric-value.total { color: #fff; font-weight: 700; font-size: 13px; }
+    .metric-value.null  { color: #2a2a38; }
+    .cell-ts { font-size: 9px; color: #2a2a38; margin-top: 4px; text-align: right; }
+
+    /* single-metric mode */
+    .cell-single {
+      text-align: center; font-size: 14px;
+      font-variant-numeric: tabular-nums;
+    }
+    .cell-single.free  { color: #4caf82; font-weight: 700; }
+    .cell-single.null  { color: #252530; }
+    .cell-single.time  { color: #5b8dee; }
+    .cell-single.total { color: #fff; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">
+      <div class="logo-icon">💸</div>
+      <div>
+        <div class="logo-text">Fee Checker</div>
+        <div class="logo-sub">Live data table</div>
+      </div>
+    </div>
+    <div class="toolbar">
+      <div id="live-dot" title="Waiting for data…"></div>
+      <button class="tool-btn" id="export-csv">Export CSV</button>
+      <button class="tool-btn danger" id="clear-all">Clear all</button>
+    </div>
+  </header>
+
+  <div class="filter-bar">
+    <span>Show:</span>
+    <button class="fchip active" data-metric="all">All metrics</button>
+    <button class="fchip" data-metric="delivery_fee">Delivery fee</button>
+    <button class="fchip" data-metric="service_fee">Service fee</button>
+    <button class="fchip" data-metric="taxes">Taxes</button>
+    <button class="fchip" data-metric="delivery_time">Est. time</button>
+    <button class="fchip" data-metric="order_total">Total</button>
+  </div>
+
+  <div class="table-wrap" id="table-wrap">
+    <div class="empty-state">
+      <h2>No data yet</h2>
+      <p>
+        Navigate to a store checkout page, open the extension,<br/>
+        select a basket size, and click <code>Analyze Fees</code>.<br/><br/>
+        Results will appear here automatically.
+      </p>
+    </div>
+  </div>
+
+  <script src="table.js"></script>
+</body>
+</html>

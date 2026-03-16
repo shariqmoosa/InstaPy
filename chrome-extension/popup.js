@@ -14,10 +14,22 @@ document.querySelectorAll(".tab").forEach(btn => {
   });
 });
 
+// ── Basket size chips ─────────────────────────────────────────────────────────
+
+let selectedSize = null;
+
+document.querySelectorAll(".bchip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    document.querySelectorAll(".bchip").forEach(c => c.classList.remove("active"));
+    chip.classList.add("active");
+    selectedSize = Number(chip.dataset.size);
+  });
+});
+
 // ── UI helpers ────────────────────────────────────────────────────────────────
 
-function show(...ids) { ids.forEach(id => $(id) && ($(id).style.display = id === "loading" ? "flex" : "block")); }
-function hide(...ids) { ids.forEach(id => $(id) && ($(id).style.display = "none")); }
+function show(id, mode = "block") { const el = $(id); if (el) el.style.display = mode; }
+function hide(...ids) { ids.forEach(id => { const el = $(id); if (el) el.style.display = "none"; }); }
 
 function showError(msg) {
   hide("loading", "results");
@@ -26,7 +38,34 @@ function showError(msg) {
   $("analyze-btn").disabled = false;
 }
 
-// ── Gemini API ────────────────────────────────────────────────────────────────
+// ── Prompt ────────────────────────────────────────────────────────────────────
+
+function buildPrompt(pageText, url) {
+  return `You are analyzing a grocery or food-delivery checkout page. Extract ALL fees and delivery information visible on the page.
+
+Page URL: ${url}
+Page content:
+---
+${pageText}
+---
+
+Return ONLY a valid JSON object — no markdown, no explanation:
+{
+  "store": "<retailer/brand name>",
+  "item_total": "<subtotal before fees or null>",
+  "delivery_fee": "<delivery fee or 'Free' or null>",
+  "service_fee": "<service or platform fee or null>",
+  "taxes": "<tax amount or null>",
+  "tip": "<tip or null>",
+  "delivery_time": "<estimated delivery time e.g. '30-45 min' or null>",
+  "other_fees": [{"name": "<fee name>", "amount": "<amount>"}],
+  "order_total": "<grand total or null>",
+  "notes": "<short caveat if any or null>"
+}
+Use null for anything not visible.`;
+}
+
+// ── AI callers ────────────────────────────────────────────────────────────────
 
 async function callGemini(apiKey, prompt) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
@@ -46,8 +85,6 @@ async function callGemini(apiKey, prompt) {
   const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
   return JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim());
 }
-
-// ── Ollama API ────────────────────────────────────────────────────────────────
 
 async function callOllama(model, prompt, apiKey) {
   const baseUrl = apiKey ? "https://ollama.com" : "http://localhost:11434";
@@ -73,30 +110,37 @@ async function callOllama(model, prompt, apiKey) {
   return JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim());
 }
 
-// ── Shared prompt ─────────────────────────────────────────────────────────────
+// ── Save capture & open/update table tab ──────────────────────────────────────
 
-function buildPrompt(pageText, url) {
-  return `You are analyzing a shopping or food-delivery page to find ALL fees.
+async function saveCapture(result, size) {
+  if (!result.store) return;
+  const store = result.store.trim();
+  const entry = {
+    delivery_fee:  result.delivery_fee  || null,
+    service_fee:   result.service_fee   || null,
+    taxes:         result.taxes         || null,
+    delivery_time: result.delivery_time || null,
+    order_total:   result.order_total   || null,
+    capturedAt:    new Date().toISOString(),
+  };
+  if (result.other_fees?.length) {
+    entry.other_fees = result.other_fees;
+  }
 
-Page URL: ${url}
-Page content:
----
-${pageText}
----
+  // Merge into existing captures
+  const { captures = {} } = await chrome.storage.local.get("captures");
+  if (!captures[store]) captures[store] = {};
+  if (size) captures[store][size] = entry;
+  await chrome.storage.local.set({ captures });
 
-Return ONLY a valid JSON object — no markdown, no explanation:
-{
-  "store": "<store name or null>",
-  "item_total": "<subtotal or null>",
-  "delivery_fee": "<delivery fee or null>",
-  "service_fee": "<service/platform fee or null>",
-  "taxes": "<tax amount or null>",
-  "tip": "<tip or null>",
-  "other_fees": [{"name": "<fee name>", "amount": "<amount>"}],
-  "order_total": "<grand total or null>",
-  "notes": "<short caveats or null>"
-}
-If a value is not visible, use null.`;
+  // Open or focus the table tab
+  const tableUrl = chrome.runtime.getURL("table.html");
+  const [existing] = await chrome.tabs.query({ url: tableUrl });
+  if (existing) {
+    chrome.tabs.update(existing.id, { active: true });
+  } else {
+    chrome.tabs.create({ url: tableUrl, active: false });
+  }
 }
 
 // ── Render results ────────────────────────────────────────────────────────────
@@ -104,8 +148,12 @@ If a value is not visible, use null.`;
 function renderResults(result) {
   $("store-name").textContent = result.store || "Fee Breakdown";
   const rows = [
-    ["Items", result.item_total], ["Delivery", result.delivery_fee],
-    ["Service fee", result.service_fee], ["Taxes", result.taxes], ["Tip", result.tip],
+    ["Items",        result.item_total],
+    ["Delivery",     result.delivery_fee],
+    ["Service fee",  result.service_fee],
+    ["Taxes",        result.taxes],
+    ["Tip",          result.tip],
+    ["Est. time",    result.delivery_time],
     ...(result.other_fees || []).map(f => [f.name, f.amount]),
   ];
   const tbody = $("fee-table");
@@ -127,9 +175,41 @@ function renderResults(result) {
   const notesEl = $("notes");
   notesEl.style.display = result.notes ? "block" : "none";
   if (result.notes) notesEl.textContent = result.notes;
+
+  // Update copy-row button
+  const copyBtn = $("copy-row-btn");
+  const sizeLabel = selectedSize ? `$${selectedSize}` : "(no size)";
+  copyBtn.textContent = `📋 Copy row for Excel  ·  ${result.store || "store"} ${sizeLabel}`;
+  copyBtn.dataset.result = JSON.stringify(result);
+  copyBtn.classList.remove("copied");
+
   hide("loading", "error-box", "analyze-btn");
   show("results");
 }
+
+// ── Copy row (tab-separated for Excel paste) ──────────────────────────────────
+
+$("copy-row-btn").addEventListener("click", () => {
+  const result = JSON.parse($("copy-row-btn").dataset.result || "{}");
+  const cols = [
+    result.store || "",
+    selectedSize ? `$${selectedSize}` : "",
+    result.delivery_fee  || "",
+    result.service_fee   || "",
+    result.taxes         || "",
+    result.delivery_time || "",
+    result.tip           || "",
+    result.order_total   || "",
+  ];
+  navigator.clipboard.writeText(cols.join("\t")).then(() => {
+    $("copy-row-btn").textContent = "✅ Copied!";
+    $("copy-row-btn").classList.add("copied");
+    setTimeout(() => {
+      $("copy-row-btn").textContent = "📋 Copy row for Excel";
+      $("copy-row-btn").classList.remove("copied");
+    }, 2000);
+  });
+});
 
 // ── Recordings tab ────────────────────────────────────────────────────────────
 
@@ -138,7 +218,7 @@ async function renderRecordings() {
   const list = $("recordings-list");
   const stores = Object.keys(recordings);
   if (stores.length === 0) {
-    list.innerHTML = `<div class="rec-empty">No recordings yet.<br/>Start recording on any store page.</div>`;
+    list.innerHTML = `<div class="rec-empty">No recordings yet.</div>`;
     return;
   }
   list.innerHTML = stores.map(store => {
@@ -174,27 +254,21 @@ async function replayRecording(store, recordings) {
   $("record-btn").disabled = true;
   $("record-btn").textContent = "▶ Replaying…";
   await chrome.runtime.sendMessage({ type: "REPLAY_STEPS", steps, tabId: tab.id });
-
-  // After replay, wait a moment then auto-analyze
   await new Promise(r => setTimeout(r, 2000));
   $("record-btn").disabled = false;
   $("record-btn").textContent = "🔴 Start Recording";
-
-  // Switch to analyze tab and run analysis
   document.querySelector('[data-tab="analyze"]').click();
   $("analyze-btn").click();
 }
-
-// ── Start recording ───────────────────────────────────────────────────────────
 
 $("record-btn").addEventListener("click", async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const store = new URL(tab.url).hostname.replace(/^www\./, "");
   await chrome.runtime.sendMessage({ type: "START_RECORDING", store, tabId: tab.id });
-  window.close(); // close popup — overlay on page takes over
+  window.close();
 });
 
-// ── Main (Analyze tab) ────────────────────────────────────────────────────────
+// ── Main (Analyze) ────────────────────────────────────────────────────────────
 
 async function main() {
   const settings = await chrome.storage.sync.get(["provider", "ollamaModel", "ollamaApiKey", "geminiApiKey"]);
@@ -209,11 +283,10 @@ async function main() {
   $("analyze-btn").addEventListener("click", async () => {
     $("analyze-btn").disabled = true;
     hide("results", "error-box");
-    $("loading-msg").textContent = "Analyzing fees…";
-    show("loading");
+    show("loading", "flex");
     try {
       const response = await chrome.tabs.sendMessage(tab.id, { type: "GET_PAGE_DATA" });
-      if (!response?.pageText) throw new Error("Could not read page content. Try refreshing the page.");
+      if (!response?.pageText) throw new Error("Could not read page. Try refreshing.");
       const prompt = buildPrompt(response.pageText, response.url);
       let result;
       if (provider === "ollama") {
@@ -222,6 +295,8 @@ async function main() {
         result = await callGemini(settings.geminiApiKey, prompt);
       }
       renderResults(result);
+      // Auto-save to table
+      await saveCapture(result, selectedSize);
     } catch (err) {
       showError(err.message || "Something went wrong.");
     }

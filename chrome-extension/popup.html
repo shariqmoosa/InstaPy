@@ -22,22 +22,18 @@
     .logo-icon {
       width: 28px; height: 28px;
       background: linear-gradient(135deg, #7c6fe0, #5b8dee);
-      border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 15px;
+      border-radius: 8px; display: flex; align-items: center;
+      justify-content: center; font-size: 15px;
     }
     .logo-text { font-weight: 700; font-size: 15px; color: #fff; }
     #settings-btn {
       background: none; border: none; cursor: pointer;
-      color: #666; font-size: 18px; padding: 2px 4px;
-      border-radius: 6px;
+      color: #666; font-size: 18px; padding: 2px 4px; border-radius: 6px;
     }
     #settings-btn:hover { color: #aaa; }
 
     /* ── Tabs ── */
-    .tabs {
-      display: flex; border-bottom: 1px solid #1e1e24;
-    }
+    .tabs { display: flex; border-bottom: 1px solid #1e1e24; }
     .tab {
       flex: 1; padding: 10px; background: none; border: none;
       color: #666; font-size: 13px; font-weight: 600; cursor: pointer;
@@ -45,23 +41,38 @@
     }
     .tab.active { color: #fff; border-bottom-color: #7c6fe0; }
 
-    /* ── Shared ── */
+    /* ── Analyze tab ── */
+    #tab-analyze { padding-bottom: 16px; }
+
     #site-label {
-      padding: 10px 16px 6px; font-size: 12px; color: #666;
+      padding: 10px 16px 4px; font-size: 12px; color: #666;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .primary-btn {
-      display: block; width: calc(100% - 32px);
-      margin: 6px 16px 14px;
+
+    /* basket chips */
+    .basket-row {
+      display: flex; align-items: center; gap: 8px; padding: 6px 16px 2px;
+    }
+    .basket-row label { font-size: 11px; color: #555; white-space: nowrap; }
+    .bchip {
+      padding: 3px 12px; border: 1px solid #2a2a35; border-radius: 20px;
+      background: none; color: #666; font-size: 12px; cursor: pointer;
+      transition: all .15s;
+    }
+    .bchip.active { border-color: #7c6fe0; color: #c0baff; background: #1a1a2e; }
+
+    #no-key { display: none; padding: 20px 16px; text-align: center; color: #888; font-size: 13px; line-height: 1.6; }
+    #no-key a { color: #7c6fe0; cursor: pointer; text-decoration: underline; }
+
+    #analyze-btn {
+      display: block; width: calc(100% - 32px); margin: 8px 16px 14px;
       padding: 10px; border: none; border-radius: 10px;
+      background: linear-gradient(135deg, #7c6fe0, #5b8dee);
       color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
       transition: opacity .15s;
     }
-    .primary-btn:hover { opacity: 0.88; }
-    .primary-btn:disabled { opacity: 0.45; cursor: default; }
-    .btn-analyze  { background: linear-gradient(135deg, #7c6fe0, #5b8dee); }
-    .btn-record   { background: linear-gradient(135deg, #e05353, #e07a53); }
-    .btn-replay   { background: linear-gradient(135deg, #53a0e0, #53e09a); }
+    #analyze-btn:hover { opacity: 0.88; }
+    #analyze-btn:disabled { opacity: 0.4; cursor: default; }
 
     #loading {
       display: none; flex-direction: column; align-items: center;
@@ -74,26 +85,36 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    #no-key { display: none; padding: 20px 16px; text-align: center; color: #888; font-size: 13px; line-height: 1.6; }
-    #no-key a { color: #7c6fe0; cursor: pointer; text-decoration: underline; }
     #error-box { display: none; margin: 0 16px 14px; padding: 10px 12px; background: #2a1a1a; border: 1px solid #5a2020; border-radius: 8px; color: #f08080; font-size: 12px; line-height: 1.5; }
 
-    /* ── Results ── */
-    #results { display: none; padding: 0 16px 16px; }
+    /* results */
+    #results { display: none; padding: 0 16px; }
     .store-name { font-size: 13px; font-weight: 600; color: #aaa; margin-bottom: 10px; }
     .fee-table { width: 100%; border-collapse: collapse; }
-    .fee-table tr td { padding: 6px 0; border-bottom: 1px solid #1e1e24; }
+    .fee-table td { padding: 6px 0; border-bottom: 1px solid #1e1e24; }
     .fee-table tr:last-child td { border-bottom: none; }
     .fee-table .label { color: #aaa; }
-    .fee-table .amount { text-align: right; color: #e8e8ea; font-variant-numeric: tabular-nums; }
-    .fee-table .null-amount { text-align: right; color: #3a3a45; }
+    .fee-table .amount { text-align: right; font-variant-numeric: tabular-nums; }
+    .fee-table .null-amount { text-align: right; color: #2e2e3a; }
     .total-row td { padding-top: 10px !important; font-weight: 700; font-size: 15px; color: #fff !important; border-bottom: none !important; }
-    .notes { margin-top: 12px; padding: 8px 10px; background: #1a1a22; border-radius: 8px; font-size: 11px; color: #666; line-height: 1.5; }
     .badge-free { color: #4caf82; }
+    .notes { margin-top: 10px; padding: 8px 10px; background: #1a1a22; border-radius: 8px; font-size: 11px; color: #666; line-height: 1.5; }
+
+    /* copy row button */
+    #copy-row-btn {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      width: 100%; margin-top: 14px;
+      padding: 9px; border: 1px solid #2a3a4a; border-radius: 10px;
+      background: #141a22; color: #5b8dee;
+      font-size: 13px; font-weight: 600; cursor: pointer; transition: all .15s;
+    }
+    #copy-row-btn:hover { border-color: #5b8dee; background: #1a2232; }
+    #copy-row-btn.copied { border-color: #4caf82; color: #4caf82; background: #1a2e22; }
 
     /* ── Recordings tab ── */
     #tab-record { display: none; padding: 0 16px 16px; }
-    .rec-empty { padding: 20px 0; text-align: center; color: #555; font-size: 13px; }
+    .record-hint { padding: 10px 0 6px; font-size: 12px; color: #555; line-height: 1.6; }
+    .rec-empty { padding: 12px 0; text-align: center; color: #444; font-size: 13px; }
     .rec-item {
       display: flex; align-items: center; justify-content: space-between;
       padding: 10px 12px; margin-bottom: 8px;
@@ -102,17 +123,20 @@
     .rec-store { font-weight: 600; font-size: 13px; }
     .rec-meta  { font-size: 11px; color: #555; margin-top: 2px; }
     .rec-actions { display: flex; gap: 6px; }
-    .rec-btn {
-      padding: 5px 10px; border: none; border-radius: 6px;
-      font-size: 12px; font-weight: 600; cursor: pointer;
-    }
+    .rec-btn { padding: 5px 10px; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
     .rec-btn-play   { background: #1e3a2e; color: #4caf82; }
     .rec-btn-delete { background: #2a1a1a; color: #e05353; }
     .rec-btn:hover  { opacity: 0.8; }
 
-    .record-hint {
-      padding: 10px 0 6px; font-size: 12px; color: #555; line-height: 1.6;
+    #record-btn {
+      display: block; width: 100%; margin: 8px 0 14px;
+      padding: 10px; border: none; border-radius: 10px;
+      background: linear-gradient(135deg, #e05353, #e07a53);
+      color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
+      transition: opacity .15s;
     }
+    #record-btn:hover { opacity: 0.88; }
+    #record-btn:disabled { opacity: 0.4; cursor: default; }
   </style>
 </head>
 <body>
@@ -133,24 +157,33 @@
   <div id="tab-analyze">
     <div id="site-label">Loading…</div>
     <div id="no-key">Add your API key in Settings.<br/><a id="open-settings">Open Settings →</a></div>
-    <button id="analyze-btn" class="primary-btn btn-analyze">Analyze Fees</button>
-    <div id="loading"><div class="spinner"></div><span id="loading-msg">Analyzing fees…</span></div>
+
+    <div class="basket-row">
+      <label>Basket:</label>
+      <div id="basket-chips">
+        <button class="bchip" data-size="25">$25</button>
+        <button class="bchip" data-size="50">$50</button>
+        <button class="bchip" data-size="75">$75</button>
+        <button class="bchip" data-size="100">$100</button>
+      </div>
+    </div>
+
+    <button id="analyze-btn">Analyze Fees</button>
+    <div id="loading"><div class="spinner"></div><span id="loading-msg">Analyzing…</span></div>
     <div id="error-box"></div>
+
     <div id="results">
       <div class="store-name" id="store-name"></div>
       <table class="fee-table" id="fee-table"></table>
       <div class="notes" id="notes" style="display:none"></div>
+      <button id="copy-row-btn">📋 Copy row for Excel</button>
     </div>
   </div>
 
   <!-- ── Recordings tab ── -->
   <div id="tab-record" style="display:none">
-    <div style="padding: 12px 0 0">
-      <div class="record-hint">
-        Train the extension once per store — it remembers your steps and auto-navigates next time.
-      </div>
-      <button id="record-btn" class="primary-btn btn-record" style="margin-top:8px">🔴 Start Recording</button>
-    </div>
+    <div class="record-hint">Train once per store — it auto-navigates to checkout next time.</div>
+    <button id="record-btn">🔴 Start Recording</button>
     <div id="recordings-list"></div>
   </div>
 
